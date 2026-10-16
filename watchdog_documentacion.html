@@ -603,13 +603,13 @@
           <td>SSID</td>
           <td>Texto</td>
           <td>Nombre de la red WiFi a la que se conecta el Watchdog. Debe ser la misma red donde están los dispositivos vigilados.</td>
-          <td>piedad</td>
+          <td>(tu red)</td>
         </tr>
         <tr>
           <td>Contraseña WiFi</td>
           <td>Password</td>
-          <td>Contraseña de la red WiFi. Se guarda en NVS cifrada.</td>
-          <td>Piedadpiedadpiedad</td>
+          <td>Contraseña de la red WiFi. Se guarda en la NVS del ESP32 (sin cifrar).</td>
+          <td>(tu contraseña)</td>
         </tr>
       </tbody>
     </table>
@@ -783,17 +783,17 @@
   <!-- 10 DEFAULTS -->
   <div class="section" id="defaults">
     <h2>📋 Valores por defecto del código</h2>
-    <p>Estos valores se usan la primera vez (flash limpio) o si NVS no tiene datos guardados para esa clave. Pueden modificarse en <code>WatchdogWeb.h</code> antes de compilar.</p>
+    <p>Estos valores se usan la primera vez (flash limpio) o si NVS no tiene datos guardados para esa clave. Pueden modificarse en <code>WatchdogWeb.h</code> antes de compilar. Las claves (WiFi y web) van en <code>secrets.h</code>, que no se sube a GitHub.</p>
     <table>
       <thead><tr><th>Constante</th><th>Valor</th><th>Descripción</th></tr></thead>
       <tbody>
-        <tr><td>DEF_SSID</td><td>piedad</td><td>Red WiFi por defecto</td></tr>
-        <tr><td>DEF_PASS</td><td>Piedadpiedadpiedad</td><td>Contraseña WiFi por defecto</td></tr>
+        <tr><td>DEF_SSID</td><td>secrets.h</td><td>Red WiFi por defecto</td></tr>
+        <tr><td>DEF_PASS</td><td>secrets.h</td><td>Contraseña WiFi por defecto</td></tr>
         <tr><td>DEF_IP</td><td>192.168.1.250</td><td>IP fija del Watchdog</td></tr>
         <tr><td>DEF_GW</td><td>192.168.1.1</td><td>Gateway por defecto</td></tr>
         <tr><td>DEF_SN</td><td>255.255.255.0</td><td>Máscara de subred</td></tr>
         <tr><td>DEF_DNS</td><td>8.8.8.8</td><td>DNS por defecto</td></tr>
-        <tr><td>DEF_WEBPASS</td><td>1234</td><td>Contraseña web por defecto</td></tr>
+        <tr><td>DEF_WEBPASS</td><td>secrets.h (1234 si no existe)</td><td>Contraseña web por defecto</td></tr>
         <tr><td>DEF_INTERVALO</td><td>30 seg</td><td>Segundos entre ciclos de ping</td></tr>
         <tr><td>DEF_MAX_FALLOS</td><td>3</td><td>Fallos antes de actuar</td></tr>
         <tr><td>DEF_T_APAGADO</td><td>5 seg</td><td>Tiempo de apagado</td></tr>

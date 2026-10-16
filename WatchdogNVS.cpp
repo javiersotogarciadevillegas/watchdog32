@@ -12,7 +12,7 @@ void cargarConfigNVS() {
   cfgGW        = prefs.getString("gw",        DEF_GW);
   cfgSN        = prefs.getString("sn",        DEF_SN);
   cfgDNS       = prefs.getString("dns",       DEF_DNS);
-  cfgIntervalo = prefs.getInt("intervalo",    DEF_INTERVALO);
+  cfgIntervalo = constrain(prefs.getInt("intervalo", DEF_INTERVALO), 5, 300);
   prefs.end();
 
   Serial.println("✅ Config global NVS: SSID=" + cfgSSID + " IP=" + cfgIP);
@@ -77,6 +77,23 @@ void guardarDispositivoNVS(int idx) {
 }
 
 // ============================================================
+// GUARDAR UNA RED WIFI (slot 0-4) Y LA RED PREFERIDA
+// ============================================================
+void guardarRedWiFiNVS(int slot) {
+  if (slot < 0 || slot >= WIFI_MAX_SLOTS) return;
+  if (!prefs.begin(NVS_NAMESPACE, false)) return;
+  prefs.putString(("wssid" + String(slot)).c_str(), wifiSSIDs[slot]);
+  prefs.putString(("wpass" + String(slot)).c_str(), wifiPasses[slot]);
+  prefs.end();
+}
+
+void guardarWiFiPrefNVS() {
+  if (!prefs.begin(NVS_NAMESPACE, false)) return;
+  prefs.putInt("wifiPref", wifiPref);
+  prefs.end();
+}
+
+// ============================================================
 // CARGAR UN DISPOSITIVO INDIVIDUAL DESDE NVS
 // ============================================================
 void cargarDispositivoNVS(int idx) {
@@ -109,15 +126,15 @@ void cargarDispositivoNVS(int idx) {
   dispositivos[idx].nombre    = campos[0];
   dispositivos[idx].ip        = campos[1];
   if (campos[2].length() > 0) stringToMac(campos[2], dispositivos[idx].mac);
-  dispositivos[idx].numBoton  = (uint8_t)campos[3].toInt();
+  dispositivos[idx].numBoton  = (uint8_t)constrain((int)campos[3].toInt(), 1, MAX_BOTON);
   dispositivos[idx].estadoESP = (campos[4] == "1");
   dispositivos[idx].codigoRF  = (uint32_t)campos[5].toInt();
   dispositivos[idx].usarESPNOW= (campos[6] == "1");
   dispositivos[idx].usarRF    = (campos[7] == "1");
   dispositivos[idx].activo    = (campos[8] == "1");
-  dispositivos[idx].maxFallos = (uint8_t)max(1, (int)campos[9].toInt());
-  dispositivos[idx].tApagado  = (uint8_t)max(1, (int)campos[10].toInt());
-  dispositivos[idx].tGracia   = (uint8_t)max(10,(int)campos[11].toInt());
+  dispositivos[idx].maxFallos = (uint8_t) constrain((int)campos[9].toInt(),  1, MAX_FALLOS_LIM);
+  dispositivos[idx].tApagado  = (uint8_t) constrain((int)campos[10].toInt(), 1, MAX_T_APAGADO);
+  dispositivos[idx].tGracia   = (uint16_t)constrain((int)campos[11].toInt(), MIN_T_GRACIA, MAX_T_GRACIA);
 }
 
 // ============================================================
