@@ -20,7 +20,18 @@ Todo se configura desde su página web (usuario `admin`). Hay un log con hora re
 3. Placa: **ESP32 Dev Module**, core **esp32 3.3.x**.
 4. Compila y sube por USB. Entra en `http://192.168.1.250` (o la IP que hayas puesto).
 
-> Si el ESP32 ya tenía configuración guardada (NVS), se sigue usando esa. `secrets.h` solo se usa con la memoria vacía.
+> Si el ESP32 ya tenía redes guardadas en su memoria (NVS), primero prueba esas. Si ninguna funciona, prueba también la red de `secrets.h` y, si conecta, la guarda con la contraseña nueva.
+
+## Si no conecta a ninguna red: MODO RESCATE 🆘
+
+Si cambias la contraseña del router, las redes guardadas en el ESP32 dejan de funcionar. En ese caso el Watchdog:
+
+1. Escribe en el monitor serie **por qué** falla cada red (por ejemplo: `CONTRASEÑA INCORRECTA` o `no se encuentra esa red`).
+2. Crea su propia WiFi: **`Watchdog32-Config`**, con la clave **`watchdog32`**.
+3. Conéctate a ella con el móvil y entra en **http://192.168.4.1** → **📶 WIFI**.
+4. Vuelve a guardar tu red, en el mismo slot y con la contraseña nueva. En unos segundos lo vuelve a intentar.
+
+Cuando consigue conectar al router, apaga su WiFi de rescate.
 
 ## Actualizar por WiFi (OTA)
 

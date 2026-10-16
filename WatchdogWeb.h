@@ -85,6 +85,17 @@
 #define WIFI_SWITCH_THRESHOLD -75     // dBm: si baja de aquí busca mejor red
 #define WIFI_MIN_IMPROVEMENT  10      // dBm: mejora mínima para cambiar
 
+// MODO RESCATE: si no conecta a ninguna red, el Watchdog crea su propia WiFi
+// Conéctate a ella con el móvil y entra en http://192.168.4.1 para arreglar la config
+#ifndef AP_RESCATE_SSID
+#define AP_RESCATE_SSID       "Watchdog32-Config"
+#endif
+#ifndef AP_RESCATE_PASS
+#define AP_RESCATE_PASS       "watchdog32"   // mínimo 8 caracteres
+#endif
+#define WIFI_RETRY_RESCATE_MS 180000  // en modo rescate, reintentar cada 3 min
+extern bool apRescateActivo;
+
 // Variables multi-red (definidas en watchdog32.ino)
 extern String  wifiSSIDs[WIFI_MAX_SLOTS];
 extern String  wifiPasses[WIFI_MAX_SLOTS];

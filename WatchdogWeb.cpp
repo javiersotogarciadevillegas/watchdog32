@@ -821,6 +821,39 @@ static String  wifiSsidPendiente       = "";
 static String  wifiPassPendiente       = "";
 static unsigned long ultimoCheckWiFi   = 0;
 
+bool apRescateActivo = false;
+
+// ── Motivo de la última desconexión (lo da el propio ESP32) ──
+static volatile uint8_t razonDesconexion = 0;
+
+static void onWiFiDesconectado(arduino_event_id_t event, arduino_event_info_t info) {
+  razonDesconexion = info.wifi_sta_disconnected.reason;
+}
+
+// Traduce el código de error del WiFi a algo entendible
+static String explicarRazon(uint8_t r) {
+  switch (r) {
+    case 0:
+      return "sin respuesta del router";
+    case WIFI_REASON_NO_AP_FOUND:
+      return "no se encuentra esa red (¿apagada, lejos o nombre mal escrito?)";
+    case WIFI_REASON_AUTH_FAIL:
+    case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:
+    case WIFI_REASON_HANDSHAKE_TIMEOUT:
+    case WIFI_REASON_AUTH_EXPIRE:
+      return "CONTRASEÑA INCORRECTA (¿la has cambiado en el router?)";
+    case WIFI_REASON_NO_AP_FOUND_W_COMPATIBLE_SECURITY:
+    case WIFI_REASON_NO_AP_FOUND_IN_AUTHMODE_THRESHOLD:
+      return "el router usa una seguridad que el ESP32 no acepta (pon WPA2 en el router)";
+    case WIFI_REASON_NO_AP_FOUND_IN_RSSI_THRESHOLD:
+      return "señal demasiado débil";
+    case WIFI_REASON_ASSOC_FAIL:
+      return "el router rechaza la conexión (¿filtro MAC o demasiados equipos?)";
+    default:
+      return "código de error " + String(r);
+  }
+}
+
 // Esperar a que conecte, sin que salte el watchdog hardware
 static bool esperarConexion(unsigned long maxMs) {
   unsigned long inicio = millis();
@@ -832,10 +865,69 @@ static bool esperarConexion(unsigned long maxMs) {
   return WiFi.status() == WL_CONNECTED;
 }
 
+// Intentar una red concreta. Devuelve true si conecta.
+static bool intentarRed(const String& ssid, const String& pass) {
+  WiFi.disconnect(false);
+  delay(100);
+  razonDesconexion = 0;
+  WiFi.begin(ssid.c_str(), pass.c_str());
+  if (esperarConexion(10000)) {
+    Serial.printf("✅ Conectado a: %s  IP: %s\n", ssid.c_str(), WiFi.localIP().toString().c_str());
+    return true;
+  }
+  String motivo = explicarRazon(razonDesconexion);
+  Serial.printf("❌ No conectó a %s → %s\n", ssid.c_str(), motivo.c_str());
+  anadirLog("WIFI", "No conecta a " + ssid + ": " + motivo);
+  return false;
+}
+
+// ── Modo rescate: WiFi propia del Watchdog ───────────────────
+static void activarAPRescate() {
+  if (apRescateActivo) return;
+  WiFi.mode(WIFI_AP_STA);
+  if (WiFi.softAP(AP_RESCATE_SSID, AP_RESCATE_PASS)) {
+    apRescateActivo = true;
+    Serial.println("🆘 MODO RESCATE: conéctate a la WiFi \"" AP_RESCATE_SSID "\" (clave: " AP_RESCATE_PASS ")");
+    Serial.println("🆘 y entra en http://" + WiFi.softAPIP().toString() + " → 📶 WIFI para corregir las redes");
+    anadirLog("WIFI", "🆘 Modo rescate activo: WiFi " AP_RESCATE_SSID " → http://" + WiFi.softAPIP().toString());
+  }
+}
+
+static void desactivarAPRescate() {
+  if (!apRescateActivo) return;
+  WiFi.softAPdisconnect(true); // apaga solo el punto de acceso, la conexión al router sigue
+  apRescateActivo = false;
+  Serial.println("✅ Modo rescate desactivado");
+  anadirLog("WIFI", "Modo rescate desactivado — conectado a " + WiFi.SSID());
+}
+
+// Guarda en un slot la red que ha funcionado (actualiza la contraseña si ya existía)
+static void recordarRed(const String& ssid, const String& pass) {
+  int slot = -1;
+  for (int i = 0; i < WIFI_MAX_SLOTS && slot < 0; i++) if (wifiSSIDs[i] == ssid) slot = i;
+  for (int i = 0; i < WIFI_MAX_SLOTS && slot < 0; i++) if (wifiSSIDs[i].length() == 0) slot = i;
+  if (slot < 0) slot = WIFI_MAX_SLOTS - 1;
+  wifiSSIDs[slot]  = ssid;
+  wifiPasses[slot] = pass;
+  guardarRedWiFiNVS(slot);
+  anadirLog("WIFI", "Red " + ssid + " guardada en slot " + String(slot + 1) + " con la contraseña nueva");
+}
+
 // ============================================================
-// CONECTAR WIFI AL ARRANQUE — intenta preferida primero
+// CONECTAR WIFI — intenta preferida primero, luego el resto,
+// luego las redes de CONFIG y de secrets.h. Si nada funciona,
+// activa el MODO RESCATE.
 // ============================================================
 void conectarWiFiMultiRed() {
+  static bool eventoRegistrado = false;
+  if (!eventoRegistrado) {
+    WiFi.onEvent(onWiFiDesconectado, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+    eventoRegistrado = true;
+  }
+
+  // El modo hay que ponerlo ANTES de configurar la IP
+  WiFi.mode(apRescateActivo ? WIFI_AP_STA : WIFI_STA);
+
   // Aplicar IP estática antes de conectar
   IPAddress ip, gw, sn, dns;
   if (ip.fromString(cfgIP) && gw.fromString(cfgGW) &&
@@ -856,16 +948,6 @@ void conectarWiFiMultiRed() {
   wifiPref = constrain(prefs.getInt("wifiPref", 0), 0, WIFI_MAX_SLOTS - 1);
   prefs.end();
 
-  // Si no hay redes guardadas usar las del código
-  bool hayRedes = false;
-  for (int i = 0; i < WIFI_MAX_SLOTS; i++)
-    if (wifiSSIDs[i].length() > 0) { hayRedes = true; break; }
-  if (!hayRedes) {
-    wifiSSIDs[0]  = cfgSSID;
-    wifiPasses[0] = cfgPass;
-    Serial.println("ℹ️ Sin redes guardadas, usando SSID por defecto: " + cfgSSID);
-  }
-
   // Orden: preferida primero, luego el resto
   int orden[WIFI_MAX_SLOTS];
   orden[0] = wifiPref;
@@ -873,22 +955,34 @@ void conectarWiFiMultiRed() {
   for (int i = 0; i < WIFI_MAX_SLOTS; i++)
     if (i != wifiPref) orden[k++] = i;
 
-  WiFi.mode(WIFI_STA);
   for (int t = 0; t < WIFI_MAX_SLOTS; t++) {
     int idx = orden[t];
     if (wifiSSIDs[idx].length() == 0) continue;
     Serial.printf("📶 Intentando slot %d: %s\n", idx, wifiSSIDs[idx].c_str());
-    WiFi.disconnect(false);
-    delay(100);
-    WiFi.begin(wifiSSIDs[idx].c_str(), wifiPasses[idx].c_str());
-    if (esperarConexion(8000)) {
-      Serial.printf("✅ Conectado a: %s  IP: %s\n",
-        wifiSSIDs[idx].c_str(), WiFi.localIP().toString().c_str());
+    if (intentarRed(wifiSSIDs[idx], wifiPasses[idx])) { desactivarAPRescate(); return; }
+  }
+
+  // Redes extra: la de CONFIG y la de secrets.h (por si has cambiado la
+  // contraseña del router y las guardadas tienen la antigua)
+  String extraSSID[2] = { cfgSSID, String(DEF_SSID) };
+  String extraPass[2] = { cfgPass, String(DEF_PASS) };
+  for (int e = 0; e < 2; e++) {
+    if (extraSSID[e].length() == 0) continue;
+    if (e == 1 && extraSSID[1] == extraSSID[0] && extraPass[1] == extraPass[0]) continue;
+    bool yaProbada = false;
+    for (int i = 0; i < WIFI_MAX_SLOTS; i++)
+      if (wifiSSIDs[i] == extraSSID[e] && wifiPasses[i] == extraPass[e]) yaProbada = true;
+    if (yaProbada) continue;
+    Serial.printf("📶 Intentando red de %s: %s\n", e == 0 ? "CONFIG" : "secrets.h", extraSSID[e].c_str());
+    if (intentarRed(extraSSID[e], extraPass[e])) {
+      recordarRed(extraSSID[e], extraPass[e]);
+      desactivarAPRescate();
       return;
     }
-    Serial.printf("❌ No conectó a %s\n", wifiSSIDs[idx].c_str());
   }
+
   Serial.println("⚠️ No se pudo conectar a ninguna red.");
+  activarAPRescate();
 }
 
 // ============================================================
@@ -903,7 +997,9 @@ void chequearCambioWiFi() {
     if (!esperarConexion(12000)) conectarWiFiMultiRed();
     return;
   }
-  if (millis() - ultimoCheckWiFi < WIFI_CHECK_INTERVAL) return;
+  // En modo rescate se reintenta menos a menudo, para que dé tiempo a usar la web
+  unsigned long intervalo = apRescateActivo ? WIFI_RETRY_RESCATE_MS : WIFI_CHECK_INTERVAL;
+  if (millis() - ultimoCheckWiFi < intervalo) return;
   ultimoCheckWiFi = millis();
   // Reconexión si se ha caído (antes también lo hacía la tarea de Core 1,
   // y las dos podían pisarse)
@@ -977,6 +1073,8 @@ void handleConfigWiFi() {
   }
   html += "</div>";
   html += "<div class='nav'><a href='/'><button class='btn btn-gray'>🏠 VOLVER</button></a></div>";
+  if (apRescateActivo)
+    html += "<div class='aviso'>🆘 <b>MODO RESCATE</b>: no conecta a ninguna red. Corrige la contraseña de tu red abajo (mismo slot) y pulsa GUARDAR: lo intentará en unos segundos. Mira el 📋 LOG para ver por qué falla cada red.</div>";
 
   html += "<div class='card'><h2>📡 REDES GUARDADAS</h2>";
   for (int i = 0; i < WIFI_MAX_SLOTS; i++) {
@@ -1050,6 +1148,8 @@ void handleGuardarWiFi() {
       wifiPasses[slot] = server.arg("pass");
       guardarRedWiFiNVS(slot);
       anadirLog("WIFI","Red guardada slot "+String(slot+1)+": "+wifiSSIDs[slot]);
+      // Sin conexión (p. ej. en modo rescate): probar la red nueva en unos segundos
+      if (WiFi.status() != WL_CONNECTED) ultimoCheckWiFi = millis() - WIFI_RETRY_RESCATE_MS + 5000;
     }
   }
   server.sendHeader("Location","/configWiFi"); server.send(303);
