@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🐕 Watchdog ESP32 — Documentación</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --bg2: #1e293b;
+    --bg3: #0f172a;
+    --border: #334155;
+    --blue: #38bdf8;
+    --yellow: #fbbf24;
+    --green: #22c55e;
+    --red: #ef4444;
+    --orange: #f97316;
+    --purple: #a78bfa;
+    --text: #e2e8f0;
+    --muted: #64748b;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 20px;
+    line-height: 1.6;
+  }
+  .page { max-width: 900px; margin: 0 auto; }
+
+  /* CABECERA */
+  .header {
+    text-align: center;
+    padding: 30px 20px;
+    background: linear-gradient(135deg, #1e293b, #0f172a);
+    border: 2px solid var(--blue);
+    border-radius: 20px;
+    margin-bottom: 30px;
+  }
+  .header h1 { color: var(--blue); font-size: 2rem; margin-bottom: 8px; }
+  .header .sub { color: var(--muted); font-size: 0.9rem; }
+  .badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: bold;
+    margin: 4px;
+  }
+  .badge-blue { background: rgba(56,189,248,0.15); color: var(--blue); border: 1px solid var(--blue); }
+  .badge-green { background: rgba(34,197,94,0.15); color: var(--green); border: 1px solid var(--green); }
+  .badge-yellow { background: rgba(251,191,36,0.15); color: var(--yellow); border: 1px solid var(--yellow); }
+
+  /* SECCIONES */
+  .section {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 24px;
+    margin-bottom: 24px;
+  }
+  .section h2 {
+    color: var(--yellow);
+    font-size: 1.15rem;
+    margin-bottom: 16px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .section h3 {
+    color: var(--blue);
+    font-size: 0.95rem;
+    margin: 18px 0 10px 0;
+  }
+  p { color: #cbd5e1; margin-bottom: 10px; font-size: 0.9rem; }
+
+  /* TABLA DE PARÁMETROS */
+  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-bottom: 10px; }
+  th {
+    background: var(--bg3);
+    color: var(--blue);
+    padding: 10px 12px;
+    text-align: left;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  td { padding: 10px 12px; border-bottom: 1px solid #1e293b; vertical-align: top; }
+  tr:hover td { background: rgba(56,189,248,0.04); }
+  td:first-child { color: var(--blue); font-family: monospace; font-size: 0.85rem; white-space: nowrap; }
+  td:nth-child(2) { color: var(--yellow); font-size: 0.8rem; white-space: nowrap; }
+  td:nth-child(3) { color: #cbd5e1; font-size: 0.82rem; }
+  td:last-child { color: var(--green); font-family: monospace; font-size: 0.8rem; }
+
+  /* FLUJO */
+  .flow {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin: 16px 0;
+  }
+  .flow-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    padding: 14px 0;
+    border-left: 2px solid var(--border);
+    padding-left: 20px;
+    position: relative;
+  }
+  .flow-step::before {
+    content: '';
+    position: absolute;
+    left: -7px;
+    top: 18px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--blue);
+    border: 2px solid var(--bg);
+  }
+  .flow-step:last-child { border-left: 2px solid transparent; }
+  .flow-num {
+    background: var(--blue);
+    color: var(--bg);
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    font-size: 0.8rem;
+    flex-shrink: 0;
+  }
+  .flow-content h4 { color: var(--text); font-size: 0.9rem; margin-bottom: 4px; }
+  .flow-content p { color: var(--muted); font-size: 0.82rem; margin: 0; }
+
+  /* ESTADOS */
+  .estados { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 16px 0; }
+  .estado-card {
+    background: var(--bg3);
+    border-radius: 12px;
+    padding: 14px;
+    border: 1px solid var(--border);
+    text-align: center;
+  }
+  .estado-card .icon { font-size: 1.5rem; margin-bottom: 6px; }
+  .estado-card .nombre { font-size: 0.8rem; font-weight: bold; margin-bottom: 4px; }
+  .estado-card .desc { font-size: 0.72rem; color: var(--muted); }
+  .estado-ok .nombre { color: var(--green); }
+  .estado-fallo .nombre { color: var(--red); }
+  .estado-gracia .nombre { color: var(--yellow); }
+  .estado-espera .nombre { color: var(--orange); }
+  .estado-inactivo .nombre { color: var(--muted); }
+
+  /* HARDWARE */
+  .hw-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 14px 0; }
+  .hw-item {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .hw-icon { font-size: 1.4rem; }
+  .hw-label { font-size: 0.75rem; color: var(--muted); }
+  .hw-val { font-size: 0.85rem; color: var(--blue); font-family: monospace; }
+
+  /* RUTAS WEB */
+  .ruta {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    background: var(--bg3);
+    border-radius: 8px;
+    margin-bottom: 8px;
+    border: 1px solid var(--border);
+  }
+  .ruta-method {
+    font-size: 0.65rem;
+    font-weight: bold;
+    padding: 3px 8px;
+    border-radius: 4px;
+    flex-shrink: 0;
+  }
+  .get { background: rgba(34,197,94,0.2); color: var(--green); }
+  .post { background: rgba(251,191,36,0.2); color: var(--yellow); }
+  .ruta-path { color: var(--blue); font-family: monospace; font-size: 0.85rem; flex-shrink: 0; }
+  .ruta-desc { color: var(--muted); font-size: 0.8rem; }
+
+  /* NVS */
+  .nvs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .nvs-item {
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+  }
+  .nvs-key { color: var(--purple); font-family: monospace; font-size: 0.8rem; }
+  .nvs-type { color: var(--muted); font-size: 0.7rem; }
+  .nvs-desc { color: #cbd5e1; font-size: 0.78rem; margin-top: 2px; }
+
+  /* ALERTA */
+  .alert {
+    background: rgba(251,191,36,0.08);
+    border: 1px solid rgba(251,191,36,0.3);
+    border-radius: 10px;
+    padding: 14px 18px;
+    margin: 14px 0;
+    font-size: 0.85rem;
+    color: var(--yellow);
+  }
+  .alert-info {
+    background: rgba(56,189,248,0.08);
+    border-color: rgba(56,189,248,0.3);
+    color: var(--blue);
+  }
+  .alert-green {
+    background: rgba(34,197,94,0.08);
+    border-color: rgba(34,197,94,0.3);
+    color: var(--green);
+  }
+
+  /* CODE */
+  code {
+    background: #0f172a;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-family: monospace;
+    font-size: 0.82rem;
+    color: var(--blue);
+  }
+
+  /* TOC */
+  .toc {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 24px;
+  }
+  .toc h3 { color: var(--blue); margin-bottom: 12px; font-size: 0.95rem; }
+  .toc a {
+    display: block;
+    color: var(--muted);
+    text-decoration: none;
+    font-size: 0.85rem;
+    padding: 4px 0;
+    border-bottom: 1px solid #1e293b;
+    transition: color 0.2s;
+  }
+  .toc a:hover { color: var(--blue); }
+  .toc a span { color: var(--border); margin-right: 8px; }
+
+  @media (max-width: 600px) {
+    .hw-grid { grid-template-columns: 1fr; }
+    .nvs-grid { grid-template-columns: 1fr; }
+    .estados { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- CABECERA -->
+  <div class="header">
+    <h1>🐕 Watchdog ESP32</h1>
+    <p class="sub">Monitor de red con reinicio automático de dispositivos</p>
+    <br>
+    <span class="badge badge-blue">ESP32 WROOM-32D/U</span>
+    <span class="badge badge-green">ESP-NOW</span>
+    <span class="badge badge-yellow">RF 433MHz</span>
+    <span class="badge badge-blue">HTTP Ping</span>
+    <span class="badge badge-green">16 dispositivos</span>
+    <span class="badge badge-yellow">Servidor web propio</span>
+  </div>
+
+  <!-- ÍNDICE -->
+  <div class="toc">
+    <h3>📋 Índice</h3>
+    <a href="#que-es"><span>01</span> ¿Qué es el Watchdog?</a>
+    <a href="#hardware"><span>02</span> Hardware necesario</a>
+    <a href="#flujo"><span>03</span> Cómo funciona — flujo completo</a>
+    <a href="#estados"><span>04</span> Estados de los dispositivos</a>
+    <a href="#config-dispositivos"><span>05</span> Configuración de dispositivos (tabla de 16)</a>
+    <a href="#config-global"><span>06</span> Configuración global</a>
+    <a href="#nvs"><span>07</span> Memoria NVS — qué se guarda</a>
+    <a href="#web-rutas"><span>08</span> Páginas web disponibles</a>
+    <a href="#log"><span>09</span> Log de eventos</a>
+    <a href="#defaults"><span>10</span> Valores por defecto</a>
+    <a href="#archivos"><span>11</span> Archivos del proyecto</a>
+  </div>
+
+  <!-- 01 QUÉ ES -->
+  <div class="section" id="que-es">
+    <h2>🎯 ¿Qué es el Watchdog?</h2>
+    <p>El Watchdog ESP32 es un dispositivo independiente que vigila continuamente que todos tus dispositivos de red (cámaras, tableros, módulos Alexa, etc.) estén respondiendo. Si detecta que alguno ha dejado de funcionar, actúa automáticamente para reiniciarlo cortando y reponiendo su alimentación eléctrica.</p>
+    <p>Es completamente autónomo — funciona sin intervención humana 24/7. Se configura una sola vez desde su página web y trabaja solo. Si el propio Watchdog se reinicia, recupera toda su configuración de la memoria NVS y retoma la vigilancia sin perder nada.</p>
+    <div class="alert alert-green">
+      ✅ El Watchdog es independiente del tablero — si el tablero se cuelga, el Watchdog puede reiniciarlo igualmente porque no depende de él para funcionar.
+    </div>
+    <div class="alert alert-info">
+      ℹ️ El Watchdog hace ping HTTP al endpoint <code>/status</code> de cada dispositivo. Cualquier respuesta HTTP (200, 401, 404...) se considera "vivo". Solo falla si no hay conexión TCP en absoluto.
+    </div>
+  </div>
+
+  <!-- 02 HARDWARE -->
+  <div class="section" id="hardware">
+    <h2>🔧 Hardware necesario</h2>
+    <div class="hw-grid">
+      <div class="hw-item">
+        <div class="hw-icon">🧠</div>
+        <div>
+          <div class="hw-val">ESP32 WROOM-32D o 32U</div>
+          <div class="hw-label">Microcontrolador principal. 32D = antena integrada / 32U = conector U.FL para antena externa. Ambos son compatibles y tienen los mismos pines.</div>
+        </div>
+      </div>
+      <div class="hw-item">
+        <div class="hw-icon">📻</div>
+        <div>
+          <div class="hw-val">FS1000A — GPIO 4</div>
+          <div class="hw-label">Transmisor RF 433MHz. Se conecta a GPIO4 (RF_TX_PIN). Permite reiniciar dispositivos que escuchan señales RF.</div>
+        </div>
+      </div>
+      <div class="hw-item">
+        <div class="hw-icon">💡</div>
+        <div>
+          <div class="hw-val">LED interno — GPIO 2</div>
+          <div class="hw-label">LED de estado integrado en la placa. Se enciende durante el arranque y se apaga cuando el sistema está listo.</div>
+        </div>
+      </div>
+      <div class="hw-item">
+        <div class="hw-icon">📶</div>
+        <div>
+          <div class="hw-val">WiFi 2.4GHz + ESP-NOW</div>
+          <div class="hw-label">Conectado a tu red WiFi para hacer pings HTTP y servir la web. ESP-NOW para comunicación directa con tableros y cámaras.</div>
+        </div>
+      </div>
+    </div>
+    <div class="alert">
+      ⚠️ El FS1000A debe conectarse a GPIO4 (no a GPIO46 ni ningún otro). Es el pin definido como RF_TX_PIN en el código.
+    </div>
+  </div>
+
+  <!-- 03 FLUJO -->
+  <div class="section" id="flujo">
+    <h2>⚙️ Cómo funciona — flujo completo</h2>
+
+    <h3>Arranque del sistema</h3>
+    <div class="flow">
+      <div class="flow-step">
+        <div class="flow-num">1</div>
+        <div class="flow-content">
+          <h4>Inicialización</h4>
+          <p>Enciende el LED de estado, carga los 16 dispositivos y la configuración global desde NVS. Si es la primera vez, usa los valores por defecto del código.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">2</div>
+        <div class="flow-content">
+          <h4>Conexión WiFi con IP fija</h4>
+          <p>Se conecta a la red WiFi configurada aplicando la IP estática antes del <code>WiFi.begin()</code>. Si la IP guardada en NVS es inválida, usa <code>192.168.1.250</code> por defecto.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">3</div>
+        <div class="flow-content">
+          <h4>Iniciar ESP-NOW y RF</h4>
+          <p>Registra los peers ESP-NOW de todos los dispositivos activos que tengan ESP-NOW habilitado. Configura el transmisor RF 433MHz en GPIO4 con protocolo 1, 10 repeticiones y pulso de 350µs.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">4</div>
+        <div class="flow-content">
+          <h4>Servidor web listo</h4>
+          <p>Registra todas las rutas HTTP y arranca el servidor en el puerto 80. Añade una entrada al log de arranque. Apaga el LED de estado.</p>
+        </div>
+      </div>
+    </div>
+
+    <h3>Ciclo principal de vigilancia</h3>
+    <div class="flow">
+      <div class="flow-step">
+        <div class="flow-num">1</div>
+        <div class="flow-content">
+          <h4>Esperar el intervalo configurado</h4>
+          <p>Cada N segundos (por defecto 30, configurable entre 5 y 300) arranca un nuevo ciclo de ping para todos los dispositivos activos.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">2</div>
+        <div class="flow-content">
+          <h4>Ping HTTP a cada dispositivo</h4>
+          <p>Para cada dispositivo activo con IP configurada, hace <code>GET http://IP/status</code> con timeout de 3 segundos. Entre pings hay una pausa de 500ms para no saturar la red.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">3A</div>
+        <div class="flow-content">
+          <h4>Si responde ✅</h4>
+          <p>Resetea el contador de fallos a 0. Actualiza el timestamp de "último OK". Si venía de un estado de fallo, lo registra en el log.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">3B</div>
+        <div class="flow-content">
+          <h4>Si no responde ⚠️</h4>
+          <p>Incrementa el contador de fallos. Lo registra en el log. Si el contador llega al máximo configurado (por defecto 3), actúa.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">4</div>
+        <div class="flow-content">
+          <h4>Actuar — enviar señal de apagado</h4>
+          <p>Envía el código ESP-NOW y/o RF configurado para ese dispositivo (según checkboxes). Esto apaga el relé que alimenta el dispositivo. Marca el dispositivo como "esperando reencender".</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">5</div>
+        <div class="flow-content">
+          <h4>Esperar tiempo de apagado</h4>
+          <p>Espera los segundos configurados en "T.Apagado" (por defecto 5s). Durante este tiempo el dispositivo está sin alimentación.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">6</div>
+        <div class="flow-content">
+          <h4>Reencender — enviar señal de encendido</h4>
+          <p>Envía de nuevo el mismo código ESP-NOW y/o RF (toggle = enciende). Resetea el contador de fallos. Entra en período de gracia.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">7</div>
+        <div class="flow-content">
+          <h4>Período de gracia 🛡️</h4>
+          <p>Durante el tiempo configurado en "T.Gracia" (por defecto 90s), no se vigila ese dispositivo. Esto da tiempo al dispositivo a arrancar completamente sin que el Watchdog lo vuelva a reiniciar.</p>
+        </div>
+      </div>
+      <div class="flow-step">
+        <div class="flow-num">8</div>
+        <div class="flow-content">
+          <h4>Vigilancia reanudada</h4>
+          <p>Fin del período de gracia. El dispositivo vuelve a ser vigilado normalmente en el siguiente ciclo de ping.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 04 ESTADOS -->
+  <div class="section" id="estados">
+    <h2>🚦 Estados de los dispositivos</h2>
+    <p>Cada dispositivo puede estar en uno de estos estados en tiempo real:</p>
+    <div class="estados">
+      <div class="estado-card estado-ok">
+        <div class="icon">✅</div>
+        <div class="nombre">OK</div>
+        <div class="desc">Respondió al último ping. Contador de fallos en 0.</div>
+      </div>
+      <div class="estado-card estado-fallo">
+        <div class="icon">⚠️</div>
+        <div class="nombre">Fallos</div>
+        <div class="desc">No responde. Muestra fallos actuales / máximo. Ej: "2/3".</div>
+      </div>
+      <div class="estado-card estado-espera">
+        <div class="icon">⏳</div>
+        <div class="nombre">Apagado</div>
+        <div class="desc">Señal de apagado enviada. Esperando el tiempo de apagado para reencender.</div>
+      </div>
+      <div class="estado-card estado-gracia">
+        <div class="icon">🛡️</div>
+        <div class="nombre">Gracia</div>
+        <div class="desc">Reencendido. En período de espera para que arranque sin vigilancia.</div>
+      </div>
+      <div class="estado-card estado-inactivo">
+        <div class="icon">—</div>
+        <div class="nombre">Inactivo</div>
+        <div class="desc">Vigilancia desactivada por checkbox. No se hace ping.</div>
+      </div>
+      <div class="estado-card estado-inactivo">
+        <div class="icon">❓</div>
+        <div class="nombre">Sin IP</div>
+        <div class="desc">Slot configurado sin IP asignada. No se puede vigilar.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 05 CONFIGURACIÓN DISPOSITIVOS -->
+  <div class="section" id="config-dispositivos">
+    <h2>📡 Configuración de dispositivos</h2>
+    <p>La página principal muestra una tabla con los 16 slots de dispositivos. Cada fila tiene los siguientes campos configurables:</p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Campo</th>
+          <th>Tipo / Rango</th>
+          <th>Descripción</th>
+          <th>Por defecto</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Nombre</td>
+          <td>Texto libre</td>
+          <td>Nombre descriptivo del dispositivo. Aparece en el log y en el estado en tiempo real. Ej: "Cámara Entrada", "Tablero Salón".</td>
+          <td>Vacío</td>
+        </tr>
+        <tr>
+          <td>IP</td>
+          <td>IPv4</td>
+          <td>Dirección IP del dispositivo a vigilar. El Watchdog hará <code>GET http://IP/status</code> cada ciclo. Debe ser una IP fija accesible desde la misma red.</td>
+          <td>Vacío</td>
+        </tr>
+        <tr>
+          <td>MAC ESP-NOW</td>
+          <td>AA:BB:CC:DD:EE:FF</td>
+          <td>Dirección MAC del dispositivo destino para el envío ESP-NOW. Se usa cuando el checkbox ESP-NOW está marcado. Se puede obtener del Serial Monitor del dispositivo al arrancar.</td>
+          <td>00:00:00:00:00:00</td>
+        </tr>
+        <tr>
+          <td>Cód ESP</td>
+          <td>Número 0–99</td>
+          <td>Código de 2 dígitos que se envía por ESP-NOW al actuar. El dispositivo receptor lo interpreta para identificar qué relé debe conmutar.</td>
+          <td>0</td>
+        </tr>
+        <tr>
+          <td>ESP-NOW ☑</td>
+          <td>Checkbox</td>
+          <td>Activa el envío por ESP-NOW al detectar fallo. Si está marcado, el Watchdog enviará el código ESP al actuar. Se puede usar junto con RF simultáneamente.</td>
+          <td>Desactivado</td>
+        </tr>
+        <tr>
+          <td>Cód RF</td>
+          <td>Número largo</td>
+          <td>Código RF 433MHz (mínimo 11 dígitos) que se envía por el transmisor FS1000A al actuar. El receptor RF del dispositivo lo interpreta para conmutar el relé de alimentación.</td>
+          <td>0</td>
+        </tr>
+        <tr>
+          <td>RF ☑</td>
+          <td>Checkbox</td>
+          <td>Activa el envío por RF 433MHz al detectar fallo. Se puede usar junto con ESP-NOW simultáneamente para mayor fiabilidad.</td>
+          <td>Desactivado</td>
+        </tr>
+        <tr>
+          <td>Fallos</td>
+          <td>1 – 10</td>
+          <td>Número de pings fallidos consecutivos que deben acumularse antes de actuar. Con 1 actúa al primer fallo. Con 3 actúa si falla 3 veces seguidas. Un fallo puntual de red no dispara la acción.</td>
+          <td>3</td>
+        </tr>
+        <tr>
+          <td>T.Apagado (s)</td>
+          <td>1 – 60 segundos</td>
+          <td>Tiempo en segundos que el dispositivo permanece apagado (sin alimentación) antes de reencenderse. Mínimo recomendado: 5 segundos. Dispositivos lentos pueden necesitar más.</td>
+          <td>5</td>
+        </tr>
+        <tr>
+          <td>T.Gracia (s)</td>
+          <td>10 – 300 segundos</td>
+          <td>Tiempo en segundos tras el reencendido durante el cual no se vigila el dispositivo. Imprescindible para que el dispositivo arranque sin que el Watchdog lo vuelva a reiniciar. Una cámara ESP32 necesita al menos 30–60s para arrancar y conectarse.</td>
+          <td>90</td>
+        </tr>
+        <tr>
+          <td>Activo ☑</td>
+          <td>Checkbox</td>
+          <td>Activa o desactiva la vigilancia de este slot. Si está desmarcado, el dispositivo no recibe pings aunque tenga IP configurada. Útil para dispositivos que no siempre están encendidos (ej: cámaras que se apagan por la noche).</td>
+          <td>Desactivado</td>
+        </tr>
+        <tr>
+          <td>Estado</td>
+          <td>Solo lectura</td>
+          <td>Muestra el estado actual en tiempo real: ✅ OK, ⚠️ N fallos, ⏳ Apagado, 🛡️ Gracia, — Inactivo.</td>
+          <td>—</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="alert">
+      ⚠️ Si un slot tiene ESP-NOW y RF ambos activados, el Watchdog enviará AMBAS señales al actuar, lo que aumenta la fiabilidad del reinicio.
+    </div>
+    <div class="alert alert-info">
+      ℹ️ Los cambios en la tabla se guardan pulsando "💾 GUARDAR TODOS LOS DISPOSITIVOS". Los datos se escriben inmediatamente en la memoria NVS y persisten tras reinicios.
+    </div>
+  </div>
+
+  <!-- 06 CONFIGURACIÓN GLOBAL -->
+  <div class="section" id="config-global">
+    <h2>⚙️ Configuración global</h2>
+    <p>Accesible desde el botón "⚙️ CONFIGURACIÓN" de la página principal. Aquí se configuran los parámetros generales del Watchdog.</p>
+
+    <h3>📶 WiFi</h3>
+    <table>
+      <thead><tr><th>Campo</th><th>Tipo</th><th>Descripción</th><th>Por defecto</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>SSID</td>
+          <td>Texto</td>
+          <td>Nombre de la red WiFi a la que se conecta el Watchdog. Debe ser la misma red donde están los dispositivos vigilados.</td>
+          <td>piedad</td>
+        </tr>
+        <tr>
+          <td>Contraseña WiFi</td>
+          <td>Password</td>
+          <td>Contraseña de la red WiFi. Se guarda en NVS cifrada.</td>
+          <td>Piedadpiedadpiedad</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>🌐 Red</h3>
+    <table>
+      <thead><tr><th>Campo</th><th>Tipo</th><th>Descripción</th><th>Por defecto</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>IP fija</td>
+          <td>IPv4</td>
+          <td>Dirección IP fija del Watchdog en la red local. Debe ser una IP libre que no asigne el router por DHCP. Esta IP es la que usas para acceder a su página web.</td>
+          <td>192.168.1.250</td>
+        </tr>
+        <tr>
+          <td>Gateway</td>
+          <td>IPv4</td>
+          <td>Puerta de enlace (IP del router).</td>
+          <td>192.168.1.1</td>
+        </tr>
+        <tr>
+          <td>Máscara de subred</td>
+          <td>IPv4</td>
+          <td>Máscara de subred de la red local.</td>
+          <td>255.255.255.0</td>
+        </tr>
+        <tr>
+          <td>DNS</td>
+          <td>IPv4</td>
+          <td>Servidor DNS. Normalmente el mismo que el gateway o un DNS público.</td>
+          <td>8.8.8.8</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>🐕 Watchdog</h3>
+    <table>
+      <thead><tr><th>Campo</th><th>Tipo / Rango</th><th>Descripción</th><th>Por defecto</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Intervalo de ping</td>
+          <td>5 – 300 segundos</td>
+          <td>Cada cuántos segundos el Watchdog hace una ronda de pings a todos los dispositivos activos. Con 30 segundos, un dispositivo caído se detecta en máximo 90 segundos (3 fallos × 30s). Con 10 segundos se detecta en 30 segundos.</td>
+          <td>30 segundos</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>🔐 Seguridad</h3>
+    <table>
+      <thead><tr><th>Campo</th><th>Tipo</th><th>Descripción</th><th>Por defecto</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Contraseña web</td>
+          <td>Password</td>
+          <td>Contraseña para acceder a la página web del Watchdog. El usuario siempre es <code>admin</code>. Mínimo recomendado: 4 caracteres.</td>
+          <td>1234</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="alert">
+      ⚠️ Al guardar la configuración global el Watchdog se reinicia automáticamente para aplicar los cambios de red. La vigilancia se reanuda en pocos segundos.
+    </div>
+  </div>
+
+  <!-- 07 NVS -->
+  <div class="section" id="nvs">
+    <h2>💾 Memoria NVS — qué se guarda</h2>
+    <p>Toda la configuración se guarda en la memoria NVS del ESP32 bajo el namespace <code>"watchdog"</code>. Si el Watchdog se reinicia, recupera todo automáticamente.</p>
+
+    <h3>Configuración global</h3>
+    <div class="nvs-grid">
+      <div class="nvs-item"><div class="nvs-key">ssid</div><div class="nvs-type">String</div><div class="nvs-desc">Nombre de la red WiFi</div></div>
+      <div class="nvs-item"><div class="nvs-key">pass</div><div class="nvs-type">String</div><div class="nvs-desc">Contraseña WiFi</div></div>
+      <div class="nvs-item"><div class="nvs-key">webpass</div><div class="nvs-type">String</div><div class="nvs-desc">Contraseña acceso web</div></div>
+      <div class="nvs-item"><div class="nvs-key">ip</div><div class="nvs-type">String</div><div class="nvs-desc">IP fija del Watchdog</div></div>
+      <div class="nvs-item"><div class="nvs-key">gw</div><div class="nvs-type">String</div><div class="nvs-desc">Gateway/Router</div></div>
+      <div class="nvs-item"><div class="nvs-key">sn</div><div class="nvs-type">String</div><div class="nvs-desc">Máscara de subred</div></div>
+      <div class="nvs-item"><div class="nvs-key">dns</div><div class="nvs-type">String</div><div class="nvs-desc">Servidor DNS</div></div>
+      <div class="nvs-item"><div class="nvs-key">intervalo</div><div class="nvs-type">Int</div><div class="nvs-desc">Segundos entre ciclos de ping</div></div>
+    </div>
+
+    <h3>Por cada dispositivo (prefijo <code>dN_</code>, donde N = 0 a 15)</h3>
+    <div class="nvs-grid">
+      <div class="nvs-item"><div class="nvs-key">dN_nom</div><div class="nvs-type">String</div><div class="nvs-desc">Nombre descriptivo</div></div>
+      <div class="nvs-item"><div class="nvs-key">dN_ip</div><div class="nvs-type">String</div><div class="nvs-desc">IP a vigilar</div></div>
+      <div class="nvs-item"><div class="nvs-key">dN_mac</div><div class="nvs-type">String</div><div class="nvs-desc">MAC ESP-NOW (AA:BB:CC:DD:EE:FF)</div></div>
+      <div class="nvs-item"><div class="nvs-key">dN_esp</div><div class="nvs-type">UChar (0–99)</div><div class="nvs-desc">Código ESP-NOW</div></div>
+      <div class="nvs-item"><div class="nvs-key">dN_rf</div><div class="nvs-type">ULong</div><div class="nvs-desc">Código RF 433MHz</div></div>
+      <div class="nvs-item"><div class="nvs-key">dN_uESP</div><div class="nvs-type">Bool</div><div class="nvs-desc">Usar ESP-NOW activado</div></div>
+      <div class="nvs-item"><div class="nvs-key">dN_uRF</div><div class="nvs-type">Bool</div><div class="nvs-desc">Usar RF activado</div></div>
+      <div class="nvs-item"><div class="nvs-key">dN_act</div><div class="nvs-type">Bool</div><div class="nvs-desc">Vigilancia activa</div></div>
+      <div class="nvs-item"><div class="nvs-key">dN_mFal</div><div class="nvs-type">UChar (1–10)</div><div class="nvs-desc">Máximo de fallos antes de actuar</div></div>
+      <div class="nvs-item"><div class="nvs-key">dN_tAp</div><div class="nvs-type">UChar (1–60)</div><div class="nvs-desc">Tiempo de apagado en segundos</div></div>
+      <div class="nvs-item"><div class="nvs-key">dN_tGr</div><div class="nvs-type">UChar (10–300)</div><div class="nvs-desc">Tiempo de gracia en segundos</div></div>
+    </div>
+
+    <div class="alert alert-info">
+      ℹ️ El estado en RAM (fallos actuales, tiempo del último OK, si está en gracia...) NO se guarda en NVS. Al reiniciar el Watchdog, todos los contadores se resetean a cero y empieza a vigilar de nuevo desde el principio.
+    </div>
+  </div>
+
+  <!-- 08 RUTAS WEB -->
+  <div class="section" id="web-rutas">
+    <h2>🌐 Páginas web disponibles</h2>
+    <p>El Watchdog sirve las siguientes URLs en su IP (por defecto <code>192.168.1.250</code>). Todas requieren autenticación HTTP básica con usuario <code>admin</code> y la contraseña configurada.</p>
+
+    <div class="ruta">
+      <span class="ruta-method get">GET</span>
+      <span class="ruta-path">/</span>
+      <span class="ruta-desc">Página principal — tabla de 16 dispositivos, estado en tiempo real, botones de navegación</span>
+    </div>
+    <div class="ruta">
+      <span class="ruta-method post">POST</span>
+      <span class="ruta-path">/guardarDispositivos</span>
+      <span class="ruta-desc">Guarda todos los dispositivos de la tabla en NVS. Redirige a la página principal.</span>
+    </div>
+    <div class="ruta">
+      <span class="ruta-method get">GET</span>
+      <span class="ruta-path">/config</span>
+      <span class="ruta-desc">Página de configuración global — WiFi, red, intervalo de ping, contraseña web</span>
+    </div>
+    <div class="ruta">
+      <span class="ruta-method post">POST</span>
+      <span class="ruta-path">/guardarConfig</span>
+      <span class="ruta-desc">Guarda la configuración global en NVS y reinicia el Watchdog para aplicar cambios</span>
+    </div>
+    <div class="ruta">
+      <span class="ruta-method get">GET</span>
+      <span class="ruta-path">/log</span>
+      <span class="ruta-desc">Log de eventos — muestra los últimos 20 eventos en orden inverso (más reciente primero)</span>
+    </div>
+    <div class="ruta">
+      <span class="ruta-method get">GET</span>
+      <span class="ruta-path">/borrarLog</span>
+      <span class="ruta-desc">Borra todos los eventos del log circular. Redirige a /log.</span>
+    </div>
+    <div class="ruta">
+      <span class="ruta-method get">GET</span>
+      <span class="ruta-path">/status</span>
+      <span class="ruta-desc">Devuelve JSON <code>{"status":"ok","uptime":SEGUNDOS}</code> — permite que otros dispositivos vigilen al propio Watchdog</span>
+    </div>
+  </div>
+
+  <!-- 09 LOG -->
+  <div class="section" id="log">
+    <h2>📋 Log de eventos</h2>
+    <p>El Watchdog mantiene un log circular de los últimos <strong>20 eventos</strong> en RAM. Se muestra en la página <code>/log</code> en orden inverso (el más reciente primero).</p>
+    <p>Cada entrada del log contiene: tiempo de uptime cuando ocurrió, nombre del dispositivo y descripción del evento.</p>
+
+    <h3>Tipos de eventos que se registran</h3>
+    <table>
+      <thead><tr><th>Evento</th><th>Cuándo ocurre</th></tr></thead>
+      <tbody>
+        <tr><td>🚀 Watchdog arrancado</td><td>Al iniciar el sistema. Incluye la IP asignada.</td></tr>
+        <tr><td>⚠️ Fallo N/M</td><td>Cada vez que un dispositivo no responde al ping. Muestra fallo actual y máximo.</td></tr>
+        <tr><td>🚨 REINICIO: N fallos consecutivos</td><td>Al superar el máximo de fallos y enviar la señal de apagado.</td></tr>
+        <tr><td>🔛 Reencendido tras Xs</td><td>Cuando se envía la señal de encendido tras el tiempo de apagado.</td></tr>
+        <tr><td>✅ Fin de gracia — vigilancia reanudada</td><td>Al terminar el período de gracia. Vuelve a vigilar normalmente.</td></tr>
+        <tr><td>✅ Recuperado tras N fallos</td><td>Cuando un dispositivo vuelve a responder después de haber tenido fallos.</td></tr>
+        <tr><td>📝 Config actualizada desde web</td><td>Al guardar cambios en la tabla de dispositivos o en la configuración global.</td></tr>
+      </tbody>
+    </table>
+
+    <div class="alert alert-info">
+      ℹ️ El log es circular — cuando llega a 20 entradas, la más antigua se sobreescribe. El log se borra al reiniciar el Watchdog (está en RAM, no en NVS). Para borrar manualmente existe el botón "🗑️ BORRAR LOG" en la página /log.
+    </div>
+  </div>
+
+  <!-- 10 DEFAULTS -->
+  <div class="section" id="defaults">
+    <h2>📋 Valores por defecto del código</h2>
+    <p>Estos valores se usan la primera vez (flash limpio) o si NVS no tiene datos guardados para esa clave. Pueden modificarse en <code>WatchdogWeb.h</code> antes de compilar.</p>
+    <table>
+      <thead><tr><th>Constante</th><th>Valor</th><th>Descripción</th></tr></thead>
+      <tbody>
+        <tr><td>DEF_SSID</td><td>piedad</td><td>Red WiFi por defecto</td></tr>
+        <tr><td>DEF_PASS</td><td>Piedadpiedadpiedad</td><td>Contraseña WiFi por defecto</td></tr>
+        <tr><td>DEF_IP</td><td>192.168.1.250</td><td>IP fija del Watchdog</td></tr>
+        <tr><td>DEF_GW</td><td>192.168.1.1</td><td>Gateway por defecto</td></tr>
+        <tr><td>DEF_SN</td><td>255.255.255.0</td><td>Máscara de subred</td></tr>
+        <tr><td>DEF_DNS</td><td>8.8.8.8</td><td>DNS por defecto</td></tr>
+        <tr><td>DEF_WEBPASS</td><td>1234</td><td>Contraseña web por defecto</td></tr>
+        <tr><td>DEF_INTERVALO</td><td>30 seg</td><td>Segundos entre ciclos de ping</td></tr>
+        <tr><td>DEF_MAX_FALLOS</td><td>3</td><td>Fallos antes de actuar</td></tr>
+        <tr><td>DEF_T_APAGADO</td><td>5 seg</td><td>Tiempo de apagado</td></tr>
+        <tr><td>DEF_T_GRACIA</td><td>20 seg</td><td>Tiempo de gracia tras reinicio</td></tr>
+        <tr><td>RF_TX_PIN</td><td>GPIO 4</td><td>Pin del transmisor FS1000A</td></tr>
+        <tr><td>LED_PIN</td><td>GPIO 2</td><td>LED de estado interno</td></tr>
+        <tr><td>MAX_DISPOSITIVOS</td><td>16</td><td>Número máximo de dispositivos</td></tr>
+        <tr><td>MAX_LOG</td><td>20</td><td>Entradas máximas en el log</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- 11 ARCHIVOS -->
+  <div class="section" id="archivos">
+    <h2>📁 Archivos del proyecto</h2>
+    <table>
+      <thead><tr><th>Archivo</th><th>Contenido</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>watchdog32.ino</td>
+          <td>Archivo principal. Variables globales, setup(), loop(), conexión WiFi, ESP-NOW, RF, lógica de reencendido y período de gracia.</td>
+        </tr>
+        <tr>
+          <td>WatchdogWeb.h</td>
+          <td>Header con estructuras (<code>Dispositivo</code>, <code>LogEntry</code>), defines de configuración, declaraciones extern de variables y prototipos de todas las funciones.</td>
+        </tr>
+        <tr>
+          <td>WatchdogWeb.cpp</td>
+          <td>Servidor web completo: página principal con tabla de dispositivos, estado en tiempo real, página de configuración global, página de log, handlers POST para guardar datos.</td>
+        </tr>
+        <tr>
+          <td>WatchdogNVS.cpp</td>
+          <td>Gestión de memoria NVS: carga y guarda configuración global y los 16 dispositivos. Namespace <code>"watchdog"</code>.</td>
+        </tr>
+        <tr>
+          <td>WatchdogPing.cpp</td>
+          <td>Lógica de ping HTTP, acciones sobre dispositivos caídos, log circular, conversión MAC string↔bytes.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>Librerías necesarias</h3>
+    <div class="alert alert-green">
+      ✅ Todas las librerías necesarias ya las tienes instaladas: <code>WiFi</code>, <code>WebServer</code>, <code>Preferences</code>, <code>esp_now</code>, <code>HTTPClient</code>, <code>RCSwitch</code>. No necesitas instalar nada nuevo.
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
