@@ -1,4 +1,6 @@
 #include "WatchdogWeb.h"
+#include <esp_task_wdt.h>
+#include <ArduinoOTA.h>
 
 // ============================================================
 // VARIABLES GLOBALES — definidas aquí, extern en .h
@@ -17,6 +19,7 @@ unsigned long  tiempoReinicio[MAX_DISPOSITIVOS];
 bool           enGracia[MAX_DISPOSITIVOS];
 bool           esperandoReencender[MAX_DISPOSITIVOS];
 unsigned long  tiempoApagado[MAX_DISPOSITIVOS];
+uint8_t        reiniciosSeguidos[MAX_DISPOSITIVOS];
 
 // Configuración global
 String         cfgSSID      = DEF_SSID;
@@ -33,11 +36,10 @@ String         wifiSSIDs[WIFI_MAX_SLOTS];
 String         wifiPasses[WIFI_MAX_SLOTS];
 int            wifiPref = 0;
 
-// Control de tiempo del ciclo de ping
-unsigned long  ultimoCicloPing = 0;
-
 // ✅ MUTEX — protege variables compartidas entre Core 0 (web) y Core 1 (ping)
 SemaphoreHandle_t watchdogMutex = NULL;
+// ✅ MUTEX del log — anadirLog() se llama desde los dos núcleos
+SemaphoreHandle_t logMutex = NULL;
 
 // Handle de la tarea de ping en Core 1
 TaskHandle_t TareaPing = NULL;
@@ -76,47 +78,12 @@ void inicializarDispositivosPorDefecto() {
     enGracia[i]             = false;
     esperandoReencender[i]  = false;
     tiempoApagado[i]        = 0;
+    reiniciosSeguidos[i]    = 0;
   }
 
   // Log vacío
   for (int i = 0; i < MAX_LOG; i++) {
     logEventos[i].valido = false;
-  }
-}
-
-// ============================================================
-// CONECTAR WIFI CON IP FIJA
-// ============================================================
-void conectarWiFi() {
-  WiFi.mode(WIFI_STA);
-
-  // Aplicar IP estática
-  IPAddress ip, gw, sn, dns;
-  if (ip.fromString(cfgIP) && gw.fromString(cfgGW) &&
-      sn.fromString(cfgSN) && dns.fromString(cfgDNS)) {
-    WiFi.config(ip, gw, sn, dns);
-    Serial.println("📍 IP fija configurada: " + cfgIP);
-  } else {
-    Serial.println("⚠️ IP inválida en NVS, usando por defecto: " + String(DEF_IP));
-    IPAddress dIP(192,168,1,250), dGW(192,168,1,1);
-    IPAddress dSN(255,255,255,0), dDNS(8,8,8,8);
-    WiFi.config(dIP, dGW, dSN, dDNS);
-  }
-
-  WiFi.begin(cfgSSID.c_str(), cfgPass.c_str());
-  Serial.print("📶 Conectando a WiFi");
-
-  int intentos = 0;
-  while (WiFi.status() != WL_CONNECTED && intentos < 40) {
-    delay(500);
-    Serial.print(".");
-    intentos++;
-  }
-
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\n✅ WiFi conectado. IP: " + WiFi.localIP().toString());
-  } else {
-    Serial.println("\n❌ No se pudo conectar al WiFi");
   }
 }
 
@@ -147,78 +114,129 @@ bool registrarPeer(const uint8_t* mac) {
 }
 
 // ============================================================
+// ENVIAR ESP-NOW EN BROADCAST — FF:FF:FF:FF:FF:FF
+// Todos los enchufes escuchan, no hace falta la MAC de cada uno
+// ============================================================
+bool enviarESPNOW(int controlValue) {
+  uint8_t broadcast[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
+  registrarPeer(broadcast);
+  struct_message msg;
+  msg.controlValue = controlValue;
+  return esp_now_send(broadcast, (uint8_t*)&msg, sizeof(msg)) == ESP_OK;
+}
+
+// ============================================================
+// REVISAR TEMPORIZADORES — reencendido tras apagado y fin de gracia
+// Se llama cada TICK_TAREA_MS desde la tarea de Core 1 (y también
+// entre ping y ping), así T.Apagado y T.Gracia se cumplen con
+// precisión aunque el intervalo de ping sea de 30 s o más.
+// ============================================================
+void revisarTemporizadores() {
+  for (int i = 0; i < MAX_DISPOSITIVOS; i++) {
+    bool reencender = false, finGracia = false;
+    Dispositivo d;
+
+    if (xSemaphoreTake(watchdogMutex, pdMS_TO_TICKS(100)) != pdTRUE) continue;
+    if (esperandoReencender[i] &&
+        millis() - tiempoApagado[i] >= (unsigned long)dispositivos[i].tApagado * 1000UL) {
+      esperandoReencender[i] = false;
+      enGracia[i]            = true;
+      tiempoReinicio[i]      = millis();
+      fallosActuales[i]      = 0;
+      reencender = true;
+    } else if (enGracia[i] &&
+        millis() - tiempoReinicio[i] >= (unsigned long)dispositivos[i].tGracia * 1000UL) {
+      enGracia[i] = false;
+      finGracia = true;
+    }
+    if (reencender || finGracia) d = dispositivos[i]; // copia para usar fuera del mutex
+    xSemaphoreGive(watchdogMutex);
+
+    if (reencender) {
+      Serial.printf("🔛 Reencendiendo %s...\n", d.nombre.c_str());
+      // ✅ REENCENDER: enviamos el estado NORMAL (alimentación ON)
+      if (d.usarESPNOW) {
+        int cv = (d.numBoton * 2) - (d.estadoESP ? 1 : 0);
+        bool ok = enviarESPNOW(cv);
+        Serial.printf("📡 ESP-NOW BROADCAST REENCENDER B%d→%s (controlValue=%d): %s\n",
+          d.numBoton, d.estadoESP ? "ON" : "OFF", cv, ok ? "enviado" : "error");
+      }
+      // Reencender por RF
+      if (d.usarRF && d.codigoRF != 0) {
+        rf.send(d.codigoRF, 24);
+      }
+      anadirLog(d.nombre, "🔛 Reencendido tras " + String(d.tApagado) + "s");
+    }
+
+    if (finGracia) {
+      Serial.printf("✅ %s — fin gracia, vigilancia reanudada\n", d.nombre.c_str());
+      anadirLog(d.nombre, "✅ Fin de gracia — vigilancia reanudada");
+    }
+  }
+}
+
+// ============================================================
 // TAREA CORE 1 — ciclo de ping + lógica de reencendido/gracia
 // Corre en Core 1 para no bloquear el servidor web (Core 0)
+// La reconexión WiFi la hace solo chequearCambioWiFi() en loop()
 // ============================================================
 void TareaPingCodigo(void* pvParameters) {
+  esp_task_wdt_add(NULL); // vigilar también esta tarea
+  bool primerCiclo = true;
+  unsigned long ultimoCicloPing = 0;
+
   for (;;) {
+    esp_task_wdt_reset();
+
     // Ciclo de ping cada cfgIntervalo segundos
-    if (WiFi.status() == WL_CONNECTED) {
+    if (WiFi.status() == WL_CONNECTED &&
+        (primerCiclo || millis() - ultimoCicloPing >= (unsigned long)cfgIntervalo * 1000UL)) {
+      primerCiclo = false;
+      ultimoCicloPing = millis();
       ejecutarCicloPing();
     }
 
-    // Verificar dispositivos esperando reencenderse o en gracia
-    for (int i = 0; i < MAX_DISPOSITIVOS; i++) {
-      if (xSemaphoreTake(watchdogMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        bool estaEsperando = esperandoReencender[i];
-        bool estaEnGracia  = enGracia[i];
-        xSemaphoreGive(watchdogMutex);
+    // Comprobar reencendidos y fin de gracia (cada medio segundo)
+    revisarTemporizadores();
 
-        if (estaEsperando) {
-          if (millis() - tiempoApagado[i] >= (unsigned long)dispositivos[i].tApagado * 1000UL) {
-            if (xSemaphoreTake(watchdogMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-              esperandoReencender[i] = false;
-              enGracia[i]            = true;
-              tiempoReinicio[i]      = millis();
-              fallosActuales[i]      = 0;
-              xSemaphoreGive(watchdogMutex);
-            }
-            Serial.printf("🔛 Reencendiendo %s...\n", dispositivos[i].nombre.c_str());
-            // ✅ REENCENDER: broadcast FF:FF:FF:FF:FF:FF — todos los enchufes escuchan
-            if (dispositivos[i].usarESPNOW) {
-              uint8_t broadcast[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
-              registrarPeer(broadcast);
-              struct_message msg;
-              uint8_t boton = dispositivos[i].numBoton;
-              bool    on    = dispositivos[i].estadoESP; // estado normal = alimentación ON
-              msg.controlValue = (boton * 2) - (on ? 1 : 0);
-              esp_now_send(broadcast, (uint8_t*)&msg, sizeof(msg));
-              Serial.printf("📡 ESP-NOW BROADCAST REENCENDER B%d→%s (controlValue=%d)\n",
-                boton, on ? "ON" : "OFF", msg.controlValue);
-            }
-            // Reencender por RF
-            if (dispositivos[i].usarRF && dispositivos[i].codigoRF != 0) {
-              rf.send(dispositivos[i].codigoRF, 24);
-            }
-            añadirLog(dispositivos[i].nombre, "🔛 Reencendido tras " +
-              String(dispositivos[i].tApagado) + "s");
-          }
-        }
-
-        if (estaEnGracia) {
-          if (millis() - tiempoReinicio[i] >= (unsigned long)dispositivos[i].tGracia * 1000UL) {
-            if (xSemaphoreTake(watchdogMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-              enGracia[i] = false;
-              xSemaphoreGive(watchdogMutex);
-            }
-            Serial.printf("✅ %s — fin gracia, vigilancia reanudada\n", dispositivos[i].nombre.c_str());
-            añadirLog(dispositivos[i].nombre, "✅ Fin de gracia — vigilancia reanudada");
-          }
-        }
-      }
-    }
-
-    // Reconexión WiFi si se cae
-    if (WiFi.status() != WL_CONNECTED) {
-      Serial.println("⚠️ WiFi caído, reconectando...");
-      WiFi.disconnect(false);
-      delay(1000);
-      conectarWiFi();
-    }
-
-    // Esperar el intervalo antes del siguiente ciclo
-    vTaskDelay(pdMS_TO_TICKS((unsigned long)cfgIntervalo * 1000UL));
+    vTaskDelay(pdMS_TO_TICKS(TICK_TAREA_MS));
   }
+}
+
+// ============================================================
+// WATCHDOG HARDWARE — si el programa se cuelga, el ESP32 se reinicia
+// ============================================================
+void iniciarWatchdogHardware() {
+  esp_task_wdt_config_t cfg = {};
+  cfg.timeout_ms     = WDT_TIMEOUT_S * 1000;
+  cfg.idle_core_mask = 0;      // no vigilar las tareas idle
+  cfg.trigger_panic  = true;   // reiniciar al saltar
+  if (esp_task_wdt_reconfigure(&cfg) != ESP_OK) esp_task_wdt_init(&cfg);
+  esp_task_wdt_add(NULL);      // vigilar loop()
+  Serial.printf("✅ Watchdog hardware activo (%ds)\n", WDT_TIMEOUT_S);
+}
+
+// ============================================================
+// OTA — actualizar el programa por WiFi desde el IDE de Arduino
+// Herramientas → Puerto → "watchdog32 at 192.168.1.250"
+// Contraseña: la misma que la de la web
+// ============================================================
+void iniciarOTA() {
+  ArduinoOTA.setHostname(OTA_HOSTNAME);
+  ArduinoOTA.setPassword(cfgWebPass.c_str());
+  ArduinoOTA.onStart([]() {
+    Serial.println("⬆️ OTA: actualización iniciada");
+    if (TareaPing) vTaskSuspend(TareaPing);   // no actuar sobre enchufes mientras tanto
+    esp_task_wdt_delete(NULL);                // la subida puede tardar
+  });
+  ArduinoOTA.onEnd([]()   { Serial.println("✅ OTA: terminada, reiniciando"); });
+  ArduinoOTA.onError([](ota_error_t e) {
+    Serial.printf("❌ OTA error %u\n", e);
+    if (TareaPing) vTaskResume(TareaPing);
+    esp_task_wdt_add(NULL);
+  });
+  ArduinoOTA.begin();
+  Serial.println("✅ OTA lista — host: " OTA_HOSTNAME);
 }
 
 // ============================================================
@@ -233,31 +251,47 @@ void setup() {
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, HIGH);
 
-  // 2. Inicializar dispositivos con defaults
+  // 2. Crear mutex ANTES de nada (el log y las tareas los usan)
+  watchdogMutex = xSemaphoreCreateMutex();
+  logMutex      = xSemaphoreCreateMutex();
+  if (watchdogMutex == NULL || logMutex == NULL) {
+    Serial.println("❌ Error creando mutex — reiniciando");
+    delay(1000); ESP.restart();
+  }
+  Serial.println("✅ Mutex creados");
+
+  // 3. Watchdog hardware
+  iniciarWatchdogHardware();
+
+  // 4. Inicializar dispositivos con defaults
   inicializarDispositivosPorDefecto();
 
-  // 3. Migrar NVS si viene de versión antigua (11 claves → 1 clave por dispositivo)
+  // 5. Migrar NVS si viene de versión antigua (11 claves → 1 clave por dispositivo)
   //    Si ya está en formato nuevo no hace nada — seguro llamarlo siempre
   migrarNVSsiNecesario();
 
-  // 4. Cargar NVS
+  // 6. Cargar NVS
   cargarTodoNVS();
   Serial.println("✅ NVS cargado");
 
-  // 4. Conectar WiFi — multi-red
+  // 7. Conectar WiFi — multi-red
   conectarWiFiMultiRed();
+  esp_task_wdt_reset();
 
-  // 5. Iniciar ESP-NOW
+  // 8. Hora real por internet (se sincroniza sola en segundo plano)
+  configTzTime(NTP_TZ, NTP_SERVER);
+
+  // 9. Iniciar ESP-NOW
   iniciarESPNOW();
 
-  // 6. Iniciar RF 433MHz
+  // 10. Iniciar RF 433MHz
   rf.enableTransmit(RF_TX_PIN);
   rf.setProtocol(1);
   rf.setRepeatTransmit(10);
   rf.setPulseLength(350);
   Serial.println("✅ RF 433MHz iniciado en GPIO" + String(RF_TX_PIN));
 
-  // 7. Pre-registrar peers ESP-NOW
+  // 11. Pre-registrar peers ESP-NOW
   for (int i = 0; i < MAX_DISPOSITIVOS; i++) {
     if (dispositivos[i].activo && dispositivos[i].usarESPNOW) {
       bool ok = registrarPeer(dispositivos[i].mac);
@@ -265,19 +299,12 @@ void setup() {
     }
   }
 
-  // 8. Crear mutex ANTES de lanzar tareas
-  watchdogMutex = xSemaphoreCreateMutex();
-  if (watchdogMutex == NULL) {
-    Serial.println("❌ Error creando mutex — reiniciando");
-    delay(1000); ESP.restart();
-  }
-  Serial.println("✅ Mutex creado");
-
-  // 9. Iniciar servidor web en Core 0 (loop)
+  // 12. Iniciar servidor web en Core 0 (loop) y OTA
   iniciarServidorWeb();
   Serial.println("✅ Servidor web en http://" + WiFi.localIP().toString());
+  iniciarOTA();
 
-  // 10. Lanzar tarea de ping en Core 1
+  // 13. Lanzar tarea de ping en Core 1
   xTaskCreatePinnedToCore(
     TareaPingCodigo,  // función
     "TareaPing",      // nombre
@@ -289,7 +316,7 @@ void setup() {
   );
   Serial.println("✅ Tarea ping lanzada en Core 1");
 
-  añadirLog("SISTEMA", "Watchdog arrancado — IP: " + WiFi.localIP().toString());
+  anadirLog("SISTEMA", "Watchdog arrancado — IP: " + WiFi.localIP().toString());
   digitalWrite(LED_PIN, LOW);
   Serial.println("--- SISTEMA LISTO ---");
 }
@@ -298,7 +325,9 @@ void setup() {
 // LOOP — Core 0: SOLO servidor web, siempre responsivo
 // ============================================================
 void loop() {
+  esp_task_wdt_reset();
   procesarWeb();
-  chequearCambioWiFi(); // auto-switch si señal mala, llamar desde Core 0
+  ArduinoOTA.handle();
+  chequearCambioWiFi(); // reconexión y auto-switch si señal mala
   delay(2);
 }

@@ -1,4 +1,5 @@
 #include "WatchdogWeb.h"
+#include <esp_task_wdt.h>
 
 // ============================================================
 // HELPER: verificar autenticación
@@ -25,86 +26,78 @@ String formatUptime(unsigned long ms) {
 // ============================================================
 // ESTILOS CSS COMUNES
 // ============================================================
+// Guardado como texto fijo en la flash: no se reconstruye en cada página
+static const char CSS_COMUN[] PROGMEM = R"rawcss(<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'Segoe UI',sans-serif;background:#0f172a;color:#e2e8f0;padding:10px;}
+h1{color:#38bdf8;text-align:center;font-size:1.3rem;margin-bottom:6px;}
+.sub{text-align:center;color:#64748b;font-size:0.78rem;margin-bottom:12px;}
+.card{background:#1e293b;border:1px solid #334155;border-radius:14px;padding:14px;margin-bottom:14px;}
+h2{color:#fbbf24;font-size:0.95rem;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #334155;display:flex;align-items:center;gap:6px;}
+/* Tabla desktop — scroll horizontal en móvil */
+.tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}
+table{width:100%;border-collapse:collapse;font-size:0.72rem;min-width:700px;}
+th{background:#0f172a;color:#38bdf8;padding:6px 4px;text-align:center;border-bottom:2px solid #334155;white-space:nowrap;}
+td{padding:4px 3px;border-bottom:1px solid #1a2744;vertical-align:middle;text-align:center;}
+tr:hover td{background:rgba(56,189,248,0.04);}
+/* Inputs de tabla — tamaño ajustado al contenido */
+.inp{background:#0f172a;border:1px solid #334155;border-radius:4px;color:#e2e8f0;padding:3px 4px;font-size:0.7rem;width:100%;}
+.inp-nom{width:130px;}
+.inp-ip{width:90px;font-family:monospace;}
+.inp-mac{width:108px;font-family:monospace;font-size:0.62rem;}
+.inp-bot{width:44px;text-align:center;}
+.inp-num{width:36px;text-align:center;}
+.inp-rf{width:80px;font-family:monospace;}
+.sel-est{width:58px;background:#0f172a;border:1px solid #334155;border-radius:4px;color:#e2e8f0;padding:2px;font-size:0.7rem;}
+input[type=checkbox]{width:15px;height:15px;cursor:pointer;accent-color:#38bdf8;}
+/* Botones */
+.btn{padding:10px 18px;border:none;border-radius:10px;font-weight:bold;cursor:pointer;font-size:0.82rem;}
+.btn-blue{background:#38bdf8;color:#0f172a;}
+.btn-green{background:#22c55e;color:white;}
+.btn-gray{background:#475569;color:white;}
+.btn-orange{background:#f97316;color:white;}
+/* Estados */
+.estado-ok{color:#22c55e;font-weight:bold;}
+.estado-fallo{color:#ef4444;font-weight:bold;}
+.estado-gracia{color:#fbbf24;font-weight:bold;}
+.estado-espera{color:#f97316;font-weight:bold;}
+.estado-inactivo{color:#475569;}
+/* Info IP */
+.ip-bar{text-align:center;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:7px;margin-bottom:12px;font-size:0.78rem;}
+.ip-bar span{color:#22c55e;font-weight:bold;font-family:monospace;}
+/* Nav */
+.nav{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:14px;}
+/* Leyenda */
+.leyenda{background:#0f172a;border:1px solid #334155;border-radius:8px;padding:10px;margin-bottom:12px;font-size:0.76rem;color:#94a3b8;line-height:1.7;}
+.leyenda b{color:#e2e8f0;}
+/* Panel test */
+.test-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+@media(max-width:480px){.test-grid{grid-template-columns:1fr;}}
+.test-box{background:#0f172a;border:1px solid #334155;border-radius:10px;padding:12px;}
+.test-title{font-weight:bold;font-size:0.82rem;margin-bottom:8px;}
+.test-inp{width:100%;padding:7px;background:#1e293b;border:1px solid #334155;border-radius:6px;color:#e2e8f0;margin-bottom:7px;font-size:0.8rem;box-sizing:border-box;}
+.test-btn{width:100%;padding:9px;border:none;border-radius:7px;font-weight:bold;cursor:pointer;font-size:0.8rem;}
+/* Tabla estado tiempo real — responsive cards en móvil */
+.estado-table{display:table;width:100%;}
+@media(max-width:600px){
+.estado-table,.estado-table thead,.estado-table tbody,.estado-table th,.estado-table td,.estado-table tr{display:block;}
+.estado-table thead{display:none;}
+.estado-table tr{background:#0f172a;border-radius:10px;padding:10px;margin-bottom:8px;border:1px solid #334155;}
+.estado-table td{text-align:left;padding:3px 0;font-size:0.8rem;}
+.estado-table td::before{content:attr(data-label)': ';color:#64748b;font-size:0.72rem;}}
+/* Config form */
+label{display:block;font-size:0.75rem;color:#94a3b8;margin-bottom:3px;margin-top:10px;}
+input.cfg,select.cfg{width:100%;padding:9px;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#e2e8f0;font-size:0.85rem;}
+.form2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+@media(max-width:480px){.form2{grid-template-columns:1fr;}}
+/* OK msg */
+.ok-msg{background:#052e16;border:1px solid #22c55e;color:#22c55e;padding:10px;border-radius:8px;text-align:center;margin-bottom:12px;font-weight:bold;}
+code{background:#0f172a;border:1px solid #334155;border-radius:3px;padding:1px 5px;font-size:0.8rem;color:#38bdf8;}
+.aviso{background:#451a03;border:1px solid #f97316;color:#fbbf24;padding:10px;border-radius:8px;text-align:center;margin-bottom:12px;font-size:0.8rem;}
+</style>)rawcss";
+
 String getCSS() {
-  String css = "<style>";
-  css += "*{box-sizing:border-box;margin:0;padding:0;}";
-  css += "body{font-family:'Segoe UI',sans-serif;background:#0f172a;color:#e2e8f0;padding:10px;}";
-  css += "h1{color:#38bdf8;text-align:center;font-size:1.3rem;margin-bottom:6px;}";
-  css += ".sub{text-align:center;color:#64748b;font-size:0.78rem;margin-bottom:12px;}";
-  css += ".card{background:#1e293b;border:1px solid #334155;border-radius:14px;padding:14px;margin-bottom:14px;}";
-  css += "h2{color:#fbbf24;font-size:0.95rem;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #334155;display:flex;align-items:center;gap:6px;}";
-
-  // Tabla desktop — scroll horizontal en móvil
-  css += ".tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;}";
-  css += "table{width:100%;border-collapse:collapse;font-size:0.72rem;min-width:700px;}";
-  css += "th{background:#0f172a;color:#38bdf8;padding:6px 4px;text-align:center;border-bottom:2px solid #334155;white-space:nowrap;}";
-  css += "td{padding:4px 3px;border-bottom:1px solid #1a2744;vertical-align:middle;text-align:center;}";
-  css += "tr:hover td{background:rgba(56,189,248,0.04);}";
-
-  // Inputs de tabla — tamaño ajustado al contenido
-  css += ".inp{background:#0f172a;border:1px solid #334155;border-radius:4px;color:#e2e8f0;padding:3px 4px;font-size:0.7rem;width:100%;}";
-  css += ".inp-nom{width:130px;}";
-  css += ".inp-ip{width:90px;font-family:monospace;}";
-  css += ".inp-mac{width:108px;font-family:monospace;font-size:0.62rem;}";
-  css += ".inp-bot{width:44px;text-align:center;}";
-  css += ".inp-num{width:36px;text-align:center;}";
-  css += ".inp-rf{width:80px;font-family:monospace;}";
-  css += ".sel-est{width:58px;background:#0f172a;border:1px solid #334155;border-radius:4px;color:#e2e8f0;padding:2px;font-size:0.7rem;}";
-  css += "input[type=checkbox]{width:15px;height:15px;cursor:pointer;accent-color:#38bdf8;}";
-
-  // Botones
-  css += ".btn{padding:10px 18px;border:none;border-radius:10px;font-weight:bold;cursor:pointer;font-size:0.82rem;}";
-  css += ".btn-blue{background:#38bdf8;color:#0f172a;}";
-  css += ".btn-green{background:#22c55e;color:white;}";
-  css += ".btn-gray{background:#475569;color:white;}";
-  css += ".btn-orange{background:#f97316;color:white;}";
-
-  // Estados
-  css += ".estado-ok{color:#22c55e;font-weight:bold;}";
-  css += ".estado-fallo{color:#ef4444;font-weight:bold;}";
-  css += ".estado-gracia{color:#fbbf24;font-weight:bold;}";
-  css += ".estado-espera{color:#f97316;font-weight:bold;}";
-  css += ".estado-inactivo{color:#475569;}";
-
-  // Info IP
-  css += ".ip-bar{text-align:center;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:7px;margin-bottom:12px;font-size:0.78rem;}";
-  css += ".ip-bar span{color:#22c55e;font-weight:bold;font-family:monospace;}";
-
-  // Nav
-  css += ".nav{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:14px;}";
-
-  // Leyenda
-  css += ".leyenda{background:#0f172a;border:1px solid #334155;border-radius:8px;padding:10px;margin-bottom:12px;font-size:0.76rem;color:#94a3b8;line-height:1.7;}";
-  css += ".leyenda b{color:#e2e8f0;}";
-
-  // Panel test
-  css += ".test-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}";
-  css += "@media(max-width:480px){.test-grid{grid-template-columns:1fr;}}";
-  css += ".test-box{background:#0f172a;border:1px solid #334155;border-radius:10px;padding:12px;}";
-  css += ".test-title{font-weight:bold;font-size:0.82rem;margin-bottom:8px;}";
-  css += ".test-inp{width:100%;padding:7px;background:#1e293b;border:1px solid #334155;border-radius:6px;color:#e2e8f0;margin-bottom:7px;font-size:0.8rem;box-sizing:border-box;}";
-  css += ".test-btn{width:100%;padding:9px;border:none;border-radius:7px;font-weight:bold;cursor:pointer;font-size:0.8rem;}";
-
-  // Tabla estado tiempo real — responsive cards en móvil
-  css += ".estado-table{display:table;width:100%;}";
-  css += "@media(max-width:600px){";
-  css += ".estado-table,.estado-table thead,.estado-table tbody,.estado-table th,.estado-table td,.estado-table tr{display:block;}";
-  css += ".estado-table thead{display:none;}";
-  css += ".estado-table tr{background:#0f172a;border-radius:10px;padding:10px;margin-bottom:8px;border:1px solid #334155;}";
-  css += ".estado-table td{text-align:left;padding:3px 0;font-size:0.8rem;}";
-  css += ".estado-table td::before{content:attr(data-label)': ';color:#64748b;font-size:0.72rem;}}";
-
-  // Config form
-  css += "label{display:block;font-size:0.75rem;color:#94a3b8;margin-bottom:3px;margin-top:10px;}";
-  css += "input.cfg,select.cfg{width:100%;padding:9px;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#e2e8f0;font-size:0.85rem;}";
-  css += ".form2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}";
-  css += "@media(max-width:480px){.form2{grid-template-columns:1fr;}}";
-
-  // OK msg
-  css += ".ok-msg{background:#052e16;border:1px solid #22c55e;color:#22c55e;padding:10px;border-radius:8px;text-align:center;margin-bottom:12px;font-weight:bold;}";
-  css += "code{background:#0f172a;border:1px solid #334155;border-radius:3px;padding:1px 5px;font-size:0.8rem;color:#38bdf8;}";
-  css += "</style>";
-  return css;
+  return String(CSS_COMUN);
 }
 
 // ============================================================
@@ -113,7 +106,13 @@ String getCSS() {
 void handleRaiz() {
   if (!checkAuth()) return;
 
-  String html = "<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>";
+  // La página es grande: se envía en trozos para no gastar tanta RAM
+  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server.send(200, "text/html; charset=utf-8", "");
+
+  String html;
+  html.reserve(3072);
+  html += "<!DOCTYPE html><html lang='es'><head><meta charset='UTF-8'>";
   html += "<meta name='viewport' content='width=device-width,initial-scale=1.0'>";
   html += "<title>🐕 Watchdog</title>";
   html += getCSS();
@@ -125,7 +124,12 @@ void handleRaiz() {
   // Barra de estado
   html += "<div class='ip-bar'>IP: <span>" + WiFi.localIP().toString() + "</span>";
   html += " &nbsp;|&nbsp; Uptime: <span id='uptimeTxt'>" + formatUptime(millis()) + "</span>";
-  html += " &nbsp;|&nbsp; WiFi: <span>" + WiFi.SSID() + " (" + String(WiFi.RSSI()) + " dBm)</span></div>";
+  html += " &nbsp;|&nbsp; WiFi: <span>" + htmlEscape(WiFi.SSID()) + " (" + String(WiFi.RSSI()) + " dBm)</span></div>";
+
+  if (server.hasArg("ok"))
+    html += "<div class='ok-msg'>✅ Dispositivos guardados</div>";
+  if (cfgWebPass == "1234")
+    html += "<div class='aviso'>⚠️ Sigues usando la contraseña por defecto <b>1234</b>. Cámbiala en ⚙️ CONFIG.</div>";
 
   // Navegación
   html += "<div class='nav'>";
@@ -193,15 +197,15 @@ void handleRaiz() {
     String pre = "d" + String(i) + "_";
     html += "<tr>";
     html += "<td><b style='color:#64748b'>" + String(i+1) + "</b></td>";
-    html += "<td><input class='inp inp-nom' type='text' name='" + pre + "nom' value='" + dispositivos[i].nombre + "' placeholder='Nombre'></td>";
-    html += "<td><input class='inp inp-ip' type='text' name='" + pre + "ip' value='" + dispositivos[i].ip + "' placeholder='192.168.1.x'></td>";
-    html += "<td><input class='inp inp-bot' type='number' name='" + pre + "bot' value='" + String(dispositivos[i].numBoton) + "' min='1' max='18'></td>";
+    html += "<td><input class='inp inp-nom' type='text' name='" + pre + "nom' value='" + htmlEscape(dispositivos[i].nombre) + "' placeholder='Nombre' maxlength='32'></td>";
+    html += "<td><input class='inp inp-ip' type='text' name='" + pre + "ip' value='" + htmlEscape(dispositivos[i].ip) + "' placeholder='192.168.1.x' maxlength='64'></td>";
+    html += "<td><input class='inp inp-bot' type='number' name='" + pre + "bot' value='" + String(dispositivos[i].numBoton) + "' min='1' max='" + String(MAX_BOTON) + "'></td>";
     html += "<td><select class='sel-est' name='" + pre + "est' title='Estado normal del relé cuando el dispositivo funciona'>";
     html += "<option value='1'" + String(dispositivos[i].estadoESP?" selected":"") + ">🟢ON</option>";
     html += "<option value='0'" + String(!dispositivos[i].estadoESP?" selected":"") + ">🔴OFF</option>";
     html += "</select></td>";
     html += "<td><input type='checkbox' name='" + pre + "uESP'" + String(dispositivos[i].usarESPNOW?" checked":"") + "></td>";
-    html += "<td><input class='inp inp-rf' type='text' name='" + pre + "rf' value='" + String(dispositivos[i].codigoRF) + "' placeholder='0'></td>";
+    html += "<td><input class='inp inp-rf' type='number' name='" + pre + "rf' value='" + String(dispositivos[i].codigoRF) + "' placeholder='0' min='0' max='16777215'></td>";
     html += "<td><input type='checkbox' name='" + pre + "uRF'" + String(dispositivos[i].usarRF?" checked":"") + "></td>";
     html += "<td><input class='inp inp-num' type='number' name='" + pre + "mFal' value='" + String(dispositivos[i].maxFallos) + "' min='1' max='10'></td>";
     html += "<td><input class='inp inp-num' type='number' name='" + pre + "tAp' value='" + String(dispositivos[i].tApagado) + "' min='1' max='60'></td>";
@@ -210,6 +214,7 @@ void handleRaiz() {
     html += "<td><input class='inp inp-mac' type='text' name='" + pre + "mac' value='" + macToString(dispositivos[i].mac) + "' placeholder='AA:BB:CC:DD:EE:FF'></td>";
     html += "<td class='" + estadoCls + "'>" + estadoTxt + "</td>";
     html += "</tr>";
+    if (html.length() > 2048) { server.sendContent(html); html = ""; }
   }
 
   html += "</tbody></table></div>";
@@ -235,12 +240,13 @@ void handleRaiz() {
 
     String ultimoOK = tiempoUltimoOK[i]==0 ? "—" : formatUptime(millis()-tiempoUltimoOK[i])+" atrás";
     html += "<tr>";
-    html += "<td data-label='Dispositivo'>" + dispositivos[i].nombre + "</td>";
-    html += "<td data-label='IP'>" + dispositivos[i].ip + "</td>";
+    html += "<td data-label='Dispositivo'>" + htmlEscape(dispositivos[i].nombre) + "</td>";
+    html += "<td data-label='IP'>" + htmlEscape(dispositivos[i].ip) + "</td>";
     html += "<td data-label='Fallos' id='fal"+String(i)+"'>" + String(fallosActuales[i]) + "</td>";
     html += "<td data-label='Estado' id='est"+String(i)+"' class='"+cls+"'>" + estado + "</td>";
     html += "<td data-label='Último OK' id='ok"+String(i)+"' style='color:#64748b'>" + ultimoOK + "</td>";
     html += "</tr>";
+    if (html.length() > 2048) { server.sendContent(html); html = ""; }
   }
   html += "</tbody></table></div>";
 
@@ -257,7 +263,8 @@ void handleRaiz() {
   html += "</script>";
   html += "</body></html>";
 
-  server.send(200, "text/html; charset=utf-8", html);
+  server.sendContent(html);
+  server.sendContent(""); // fin de la respuesta por trozos
 }
 
 // ============================================================
@@ -269,30 +276,38 @@ void handleGuardarDispositivos() {
   for (int i = 0; i < MAX_DISPOSITIVOS; i++) {
     String pre = "d" + String(i) + "_";
 
-    if (server.hasArg(pre + "nom")) dispositivos[i].nombre = server.arg(pre + "nom");
-    if (server.hasArg(pre + "ip"))  dispositivos[i].ip     = server.arg(pre + "ip");
+    // 1. Leer el formulario en una copia (sin tocar todavía el original)
+    Dispositivo d = dispositivos[i];
+    if (server.hasArg(pre + "nom")) d.nombre = limpiarTexto(server.arg(pre + "nom"));
+    if (server.hasArg(pre + "ip"))  d.ip     = limpiarTexto(server.arg(pre + "ip"));
 
     // MAC — solo informativa, no crítica
     String macStr = server.arg(pre + "mac");
-    if (macStr.length() > 0) stringToMac(macStr, dispositivos[i].mac);
+    if (macStr.length() > 0) stringToMac(macStr, d.mac);
 
-    dispositivos[i].numBoton   = server.arg(pre + "bot").toInt();
-    dispositivos[i].estadoESP  = (server.arg(pre + "est") == "1");
-    dispositivos[i].codigoRF   = server.arg(pre + "rf").toInt();
-    dispositivos[i].usarESPNOW = server.hasArg(pre + "uESP");
-    dispositivos[i].usarRF     = server.hasArg(pre + "uRF");
-    dispositivos[i].activo     = server.hasArg(pre + "act");
-    dispositivos[i].maxFallos  = max(1, (int)server.arg(pre + "mFal").toInt());
-    dispositivos[i].tApagado   = max(1, (int)server.arg(pre + "tAp").toInt());
-    dispositivos[i].tGracia    = max(10,(int)server.arg(pre + "tGr").toInt());
+    d.numBoton   = (uint8_t) constrain((int)server.arg(pre + "bot").toInt(),  1, MAX_BOTON);
+    d.estadoESP  = (server.arg(pre + "est") == "1");
+    d.codigoRF   = (uint32_t)strtoul(server.arg(pre + "rf").c_str(), nullptr, 10) & 0xFFFFFF; // RF usa 24 bits
+    d.usarESPNOW = server.hasArg(pre + "uESP");
+    d.usarRF     = server.hasArg(pre + "uRF");
+    d.activo     = server.hasArg(pre + "act");
+    d.maxFallos  = (uint8_t) constrain((int)server.arg(pre + "mFal").toInt(), 1, MAX_FALLOS_LIM);
+    d.tApagado   = (uint8_t) constrain((int)server.arg(pre + "tAp").toInt(),  1, MAX_T_APAGADO);
+    d.tGracia    = (uint16_t)constrain((int)server.arg(pre + "tGr").toInt(),  MIN_T_GRACIA, MAX_T_GRACIA);
 
+    // 2. Copiarlo al original con el mutex (Core 1 lo está leyendo)
+    xSemaphoreTake(watchdogMutex, portMAX_DELAY);
+    dispositivos[i] = d;
+    xSemaphoreGive(watchdogMutex);
+
+    // 3. Guardar en NVS (fuera del mutex, tarda un poco)
     guardarDispositivoNVS(i);
 
-    if (dispositivos[i].activo && dispositivos[i].usarESPNOW)
-      registrarPeer(dispositivos[i].mac);
+    if (d.activo && d.usarESPNOW)
+      registrarPeer(d.mac);
   }
 
-  añadirLog("SISTEMA", "Dispositivos actualizados desde web");
+  anadirLog("SISTEMA", "Dispositivos actualizados desde web");
   server.sendHeader("Location", "/?ok=1");
   server.send(303);
 }
@@ -311,8 +326,14 @@ void handleConfiguracion() {
   html += "<h1>⚙️ CONFIGURACIÓN</h1>";
   if (guardado) html += "<div class='ok-msg'>✅ Guardado — reiniciando...</div>";
 
-  html += "<div class='card'><form action='/guardarConfig' method='POST'>";
+  if (server.hasArg("importError"))
+    html += "<div class='aviso'>❌ No se pudo importar: el fichero no es un backup válido del Watchdog</div>";
 
+  // ✅ FIX: antes el formulario de importar estaba DENTRO del de guardar.
+  // Eso no se puede hacer en HTML: el botón "Importar" enviaba a /guardarConfig
+  // y el botón "GUARDAR Y REINICIAR" quedaba fuera de cualquier formulario.
+  // Ahora el backup es una tarjeta aparte.
+  html += "<div class='card'>";
   html += "<h2>💾 BACKUP / RESTAURACIÓN</h2>";
   html += "<div style='display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:15px'>";
 
@@ -333,19 +354,23 @@ void handleConfiguracion() {
   html += "</form></div>";
 
   html += "</div>";
+  html += "<div style='color:#f97316;font-size:0.7rem;text-align:center'>⚠️ El fichero exportado contiene tus contraseñas: no lo subas a GitHub</div>";
+  html += "</div>"; // fin tarjeta backup
 
-  html += "<h2>📶 WiFi</h2>";
+  html += "<div class='card'><form action='/guardarConfig' method='POST'>";
+  html += "<h2>📶 WiFi (red por defecto)</h2>";
   html += "<div class='form2'>";
-  html += "<div><label>SSID</label><input class='cfg' type='text' name='ssid' value='" + cfgSSID + "'></div>";
-  html += "<div><label>Contraseña WiFi</label><input class='cfg' type='password' name='pass' value='" + cfgPass + "'></div>";
+  html += "<div><label>SSID</label><input class='cfg' type='text' name='ssid' value='" + htmlEscape(cfgSSID) + "'></div>";
+  html += "<div><label>Contraseña WiFi</label><input class='cfg' type='password' name='pass' placeholder='(sin cambios)'></div>";
   html += "</div>";
+  html += "<div style='color:#64748b;font-size:0.7rem;margin-top:4px'>Deja la contraseña vacía para mantener la actual. Para varias redes usa 📶 WIFI.</div>";
 
   html += "<h2>🌐 Red (IP fija del Watchdog)</h2>";
   html += "<div class='form2'>";
-  html += "<div><label>IP Watchdog</label><input class='cfg' type='text' name='ip' value='" + cfgIP + "'></div>";
-  html += "<div><label>Gateway</label><input class='cfg' type='text' name='gw' value='" + cfgGW + "'></div>";
-  html += "<div><label>Máscara</label><input class='cfg' type='text' name='sn' value='" + cfgSN + "'></div>";
-  html += "<div><label>DNS</label><input class='cfg' type='text' name='dns' value='" + cfgDNS + "'></div>";
+  html += "<div><label>IP Watchdog</label><input class='cfg' type='text' name='ip' value='" + htmlEscape(cfgIP) + "'></div>";
+  html += "<div><label>Gateway</label><input class='cfg' type='text' name='gw' value='" + htmlEscape(cfgGW) + "'></div>";
+  html += "<div><label>Máscara</label><input class='cfg' type='text' name='sn' value='" + htmlEscape(cfgSN) + "'></div>";
+  html += "<div><label>DNS</label><input class='cfg' type='text' name='dns' value='" + htmlEscape(cfgDNS) + "'></div>";
   html += "</div>";
 
   html += "<h2>🐕 Watchdog</h2>";
@@ -353,8 +378,8 @@ void handleConfiguracion() {
   html += "<input class='cfg' type='number' name='intervalo' value='" + String(cfgIntervalo) + "' min='5' max='300'>";
 
   html += "<h2>🔐 Acceso web</h2>";
-  html += "<label>Contraseña (usuario: admin)</label>";
-  html += "<input class='cfg' type='password' name='webpass' value='" + cfgWebPass + "'>";
+  html += "<label>Nueva contraseña (usuario: admin) — también se usa para OTA</label>";
+  html += "<input class='cfg' type='password' name='webpass' placeholder='(sin cambios)'>";
 
   html += "<br><br><button type='submit' class='btn btn-green' style='width:100%'>💾 GUARDAR Y REINICIAR</button>";
   html += "</form></div>";
@@ -369,16 +394,19 @@ void handleConfiguracion() {
 // ============================================================
 void handleGuardarConfig() {
   if (!checkAuth()) return;
-  if (server.hasArg("ssid"))      cfgSSID      = server.arg("ssid");
-  if (server.hasArg("pass"))      cfgPass      = server.arg("pass");
-  if (server.hasArg("ip"))        cfgIP        = server.arg("ip");
-  if (server.hasArg("gw"))        cfgGW        = server.arg("gw");
-  if (server.hasArg("sn"))        cfgSN        = server.arg("sn");
-  if (server.hasArg("dns"))       cfgDNS       = server.arg("dns");
-  if (server.hasArg("webpass"))   cfgWebPass   = server.arg("webpass");
-  if (server.hasArg("intervalo")) cfgIntervalo = max(5, (int)server.arg("intervalo").toInt());
+  IPAddress tmp;
+  if (server.hasArg("ssid") && server.arg("ssid").length() > 0) cfgSSID = server.arg("ssid");
+  // Contraseñas: si el campo llega vacío se mantiene la actual
+  if (server.arg("pass").length() > 0)    cfgPass    = server.arg("pass");
+  if (server.arg("webpass").length() > 0) cfgWebPass = server.arg("webpass");
+  // IPs: solo se aceptan si tienen formato válido
+  if (tmp.fromString(server.arg("ip")))  cfgIP  = server.arg("ip");
+  if (tmp.fromString(server.arg("gw")))  cfgGW  = server.arg("gw");
+  if (tmp.fromString(server.arg("sn")))  cfgSN  = server.arg("sn");
+  if (tmp.fromString(server.arg("dns"))) cfgDNS = server.arg("dns");
+  if (server.hasArg("intervalo")) cfgIntervalo = constrain((int)server.arg("intervalo").toInt(), 5, 300);
   guardarConfigNVS();
-  añadirLog("SISTEMA", "Configuración global actualizada — SSID:" + cfgSSID + " IP:" + cfgIP);
+  anadirLog("SISTEMA", "Configuración global actualizada — SSID:" + cfgSSID + " IP:" + cfgIP);
   Serial.println("💾 Config guardada: SSID=" + cfgSSID + " IP=" + cfgIP);
   server.send(200,"text/html; charset=utf-8",
     "<html><body style='background:#0f172a;color:#22c55e;text-align:center;padding-top:60px'>"
@@ -402,19 +430,21 @@ void handleLog() {
   html += "</div>";
 
   html += "<div class='card'>";
-  html += "<table style='min-width:300px'><thead><tr><th>Uptime</th><th>Dispositivo</th><th>Evento</th></tr></thead><tbody>";
+  html += "<table style='min-width:300px'><thead><tr><th>Hora</th><th>Dispositivo</th><th>Evento</th></tr></thead><tbody>";
 
   int count = 0;
+  xSemaphoreTake(logMutex, portMAX_DELAY);
   for (int i = 0; i < MAX_LOG; i++) {
     int idx = ((logIndex - 1 - i) + MAX_LOG) % MAX_LOG;
     if (!logEventos[idx].valido) continue;
     html += "<tr>";
-    html += "<td style='color:#64748b;white-space:nowrap'>" + formatUptime(logEventos[idx].timestamp) + "</td>";
-    html += "<td style='color:#fbbf24'>" + logEventos[idx].dispositivo + "</td>";
-    html += "<td>" + logEventos[idx].evento + "</td>";
+    html += "<td style='color:#64748b;white-space:nowrap'>" + formatHoraLog(logEventos[idx]) + "</td>";
+    html += "<td style='color:#fbbf24'>" + htmlEscape(logEventos[idx].dispositivo) + "</td>";
+    html += "<td>" + htmlEscape(logEventos[idx].evento) + "</td>";
     html += "</tr>";
     count++;
   }
+  xSemaphoreGive(logMutex);
   if (count == 0)
     html += "<tr><td colspan='3' style='color:#475569;text-align:center'>Sin eventos</td></tr>";
 
@@ -427,8 +457,10 @@ void handleLog() {
 // ============================================================
 void handleBorrarLog() {
   if (!checkAuth()) return;
+  xSemaphoreTake(logMutex, portMAX_DELAY);
   for (int i = 0; i < MAX_LOG; i++) logEventos[i].valido = false;
   logIndex = 0;
+  xSemaphoreGive(logMutex);
   server.sendHeader("Location", "/log");
   server.send(303);
 }
@@ -451,7 +483,7 @@ void handleTestRF() {
     if (cod > 0) {
       rf.send(cod, 24);
       Serial.printf("🧪 Test RF: %lu\n", cod);
-      añadirLog("TEST", "📻 RF enviado: " + String(cod));
+      anadirLog("TEST", "📻 RF enviado: " + String(cod));
     }
   }
   server.sendHeader("Location", "/");
@@ -466,14 +498,9 @@ void handleTestESP() {
   if (server.hasArg("codigo")) {
     int cod = server.arg("codigo").toInt();
     // ✅ Broadcast: FF:FF:FF:FF:FF:FF — todos los enchufes escuchan
-    uint8_t broadcast[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
-    registrarPeer(broadcast);
-    struct_message msg;
-    msg.controlValue = cod;
-    esp_err_t res = esp_now_send(broadcast, (uint8_t*)&msg, sizeof(msg));
-    String resultado = (res == ESP_OK) ? "✅ Enviado" : "❌ Error";
+    String resultado = enviarESPNOW(cod) ? "✅ Enviado" : "❌ Error";
     Serial.printf("🧪 Test ESP-NOW broadcast cod=%d → %s\n", cod, resultado.c_str());
-    añadirLog("TEST", "📡 ESP-NOW broadcast cod=" + String(cod) + " → " + resultado);
+    anadirLog("TEST", "📡 ESP-NOW broadcast cod=" + String(cod) + " → " + resultado);
   }
   server.sendHeader("Location", "/");
   server.send(303);
@@ -483,6 +510,7 @@ void handleTestESP() {
 // ESTADO JSON — auto-refresco
 // ============================================================
 void handleEstado() {
+  if (!checkAuth()) return;
   String json = "{";
   json += "\"uptime\":\"" + formatUptime(millis()) + "\"";
   json += ",\"estados\":[";
@@ -518,22 +546,32 @@ void handleExportNVS() {
 
   // ── Config global ─────────────────────────────────────────
   json += "  \"config\": {\n";
-  json += "    \"ssid\": \""     + cfgSSID      + "\",\n";
-  json += "    \"pass\": \""     + cfgPass      + "\",\n";
-  json += "    \"webpass\": \""  + cfgWebPass   + "\",\n";
-  json += "    \"ip\": \""       + cfgIP        + "\",\n";
-  json += "    \"gw\": \""       + cfgGW        + "\",\n";
-  json += "    \"sn\": \""       + cfgSN        + "\",\n";
-  json += "    \"dns\": \""      + cfgDNS       + "\",\n";
+  json += "    \"ssid\": \""     + jsonEscape(cfgSSID)    + "\",\n";
+  json += "    \"pass\": \""     + jsonEscape(cfgPass)    + "\",\n";
+  json += "    \"webpass\": \""  + jsonEscape(cfgWebPass) + "\",\n";
+  json += "    \"ip\": \""       + jsonEscape(cfgIP)      + "\",\n";
+  json += "    \"gw\": \""       + jsonEscape(cfgGW)      + "\",\n";
+  json += "    \"sn\": \""       + jsonEscape(cfgSN)      + "\",\n";
+  json += "    \"dns\": \""      + jsonEscape(cfgDNS)     + "\",\n";
   json += "    \"intervalo\": "  + String(cfgIntervalo) + "\n";
   json += "  },\n";
+
+  // ── Redes WiFi guardadas (multi-red) ──────────────────────
+  json += "  \"wifiPref\": " + String(wifiPref) + ",\n";
+  json += "  \"redes\": [\n";
+  for (int i = 0; i < WIFI_MAX_SLOTS; i++) {
+    json += "    { \"ssid\": \"" + jsonEscape(wifiSSIDs[i]) + "\", \"pass\": \"" + jsonEscape(wifiPasses[i]) + "\" }";
+    if (i < WIFI_MAX_SLOTS - 1) json += ",";
+    json += "\n";
+  }
+  json += "  ],\n";
 
   // ── Dispositivos ──────────────────────────────────────────
   json += "  \"dispositivos\": [\n";
   for (int i = 0; i < MAX_DISPOSITIVOS; i++) {
     json += "    {\n";
-    json += "      \"nombre\": \""    + dispositivos[i].nombre + "\",\n";
-    json += "      \"ip\": \""        + dispositivos[i].ip     + "\",\n";
+    json += "      \"nombre\": \""    + jsonEscape(dispositivos[i].nombre) + "\",\n";
+    json += "      \"ip\": \""        + jsonEscape(dispositivos[i].ip)     + "\",\n";
     json += "      \"mac\": \""       + macToString(dispositivos[i].mac) + "\",\n";
     json += "      \"numBoton\": "    + String(dispositivos[i].numBoton)  + ",\n";
     json += "      \"estadoESP\": "   + String(dispositivos[i].estadoESP  ? "true" : "false") + ",\n";
@@ -563,138 +601,216 @@ void handleExportNVS() {
 // ============================================================
 // IMPORTAR NVS ← JSON subido
 // ============================================================
-void handleImportNVS() {
-  // ✅ FIX: NO llamar checkAuth() aquí
-  // El handler de upload se llama múltiples veces (START, WRITE, END)
-  // y checkAuth() falla en las llamadas intermedias cortando el upload
-  // La autenticación se hace en el handler de respuesta (lambda vacía del server.on)
 
+// ── Lector JSON sencillo ─────────────────────────────────────
+// Acepta espacios/saltos de línea donde sea y comillas escapadas (\")
+static bool esEspacio(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
+
+// Devuelve la posición del valor de "clave" (justo después de ':') o -1
+static int buscarValor(const String& j, const char* clave) {
+  String k = String("\"") + clave + "\"";
+  int i = j.indexOf(k);
+  if (i < 0) return -1;
+  i += k.length();
+  while (i < (int)j.length() && esEspacio(j[i])) i++;
+  if (i >= (int)j.length() || j[i] != ':') return -1;
+  i++;
+  while (i < (int)j.length() && esEspacio(j[i])) i++;
+  return (i < (int)j.length()) ? i : -1;
+}
+
+// j[abre] es '{' o '[' — devuelve dónde se cierra (saltando lo que va entre comillas)
+static int cerrarBloque(const String& j, int abre) {
+  int nivel = 0;
+  bool enTexto = false;
+  for (int i = abre; i < (int)j.length(); i++) {
+    char c = j[i];
+    if (enTexto) {
+      if (c == '\\') i++;            // saltar el carácter escapado
+      else if (c == '"') enTexto = false;
+    } else if (c == '"') enTexto = true;
+    else if (c == '{' || c == '[') nivel++;
+    else if (c == '}' || c == ']') { if (--nivel == 0) return i; }
+  }
+  return -1;
+}
+
+// Devuelve el bloque {..} o [..] de "clave" (vacío si no existe)
+static String bloqueJSON(const String& j, const char* clave, char tipo) {
+  int i = buscarValor(j, clave);
+  if (i < 0 || j[i] != tipo) return "";
+  int fin = cerrarBloque(j, i);
+  return (fin > i) ? j.substring(i, fin + 1) : "";
+}
+
+// Recorre los objetos {..} de un array: devuelve el siguiente o "" si no hay más
+static String siguienteObjeto(const String& arr, int& pos) {
+  int abre = arr.indexOf('{', pos);
+  if (abre < 0) return "";
+  int fin = cerrarBloque(arr, abre);
+  if (fin < 0) return "";
+  pos = fin + 1;
+  return arr.substring(abre, fin + 1);
+}
+
+static bool jsonStr(const String& j, const char* clave, String& out) {
+  int i = buscarValor(j, clave);
+  if (i < 0 || j[i] != '"') return false;
+  String r;
+  for (i++; i < (int)j.length(); i++) {
+    char c = j[i];
+    if (c == '\\' && i + 1 < (int)j.length()) { r += j[++i]; continue; }
+    if (c == '"') { out = r; return true; }
+    r += c;
+  }
+  return false;
+}
+
+static bool jsonLong(const String& j, const char* clave, long& out) {
+  int i = buscarValor(j, clave);
+  if (i < 0) return false;
+  const char* ini = j.c_str() + i;
+  char* fin;
+  long v = strtol(ini, &fin, 10);
+  if (fin == ini) return false;
+  out = v;
+  return true;
+}
+
+static bool jsonBool(const String& j, const char* clave, bool& out) {
+  int i = buscarValor(j, clave);
+  if (i < 0) return false;
+  if (j.startsWith("true", i))  { out = true;  return true; }
+  if (j.startsWith("false", i)) { out = false; return true; }
+  return false;
+}
+
+// ── Aplicar el JSON a la configuración ───────────────────────
+static bool aplicarImportJSON(const String& json) {
+  String cfg  = bloqueJSON(json, "config", '{');
+  String devs = bloqueJSON(json, "dispositivos", '[');
+  if (cfg.length() == 0 || devs.length() == 0) {
+    Serial.println("❌ Import: el JSON no tiene 'config' o 'dispositivos'");
+    return false;
+  }
+
+  // Config global
+  String v; long n; IPAddress tmp;
+  if (jsonStr(cfg, "ssid", v)    && v.length() > 0) cfgSSID    = v;
+  if (jsonStr(cfg, "pass", v))                      cfgPass    = v;
+  if (jsonStr(cfg, "webpass", v) && v.length() > 0) cfgWebPass = v;
+  if (jsonStr(cfg, "ip",  v) && tmp.fromString(v))  cfgIP  = v;
+  if (jsonStr(cfg, "gw",  v) && tmp.fromString(v))  cfgGW  = v;
+  if (jsonStr(cfg, "sn",  v) && tmp.fromString(v))  cfgSN  = v;
+  if (jsonStr(cfg, "dns", v) && tmp.fromString(v))  cfgDNS = v;
+  if (jsonLong(cfg, "intervalo", n)) cfgIntervalo = constrain((int)n, 5, 300);
+  guardarConfigNVS();
+  Serial.println("✅ Config global importada");
+
+  // Redes WiFi (los backups antiguos no las tienen: entonces no se tocan)
+  String redes = bloqueJSON(json, "redes", '[');
+  if (redes.length() > 0) {
+    int pos = 0;
+    for (int i = 0; i < WIFI_MAX_SLOTS; i++) {
+      String obj = siguienteObjeto(redes, pos);
+      if (obj.length() == 0) break;
+      String ssid, pass;
+      jsonStr(obj, "ssid", ssid);
+      jsonStr(obj, "pass", pass);
+      wifiSSIDs[i]  = ssid;
+      wifiPasses[i] = pass;
+      guardarRedWiFiNVS(i);
+    }
+    if (jsonLong(json, "wifiPref", n) && n >= 0 && n < WIFI_MAX_SLOTS) {
+      wifiPref = n;
+      guardarWiFiPrefNVS();
+    }
+    Serial.println("✅ Redes WiFi importadas");
+  }
+
+  // Dispositivos
+  int pos = 0;
+  for (int i = 0; i < MAX_DISPOSITIVOS; i++) {
+    String obj = siguienteObjeto(devs, pos);
+    if (obj.length() == 0) break;
+
+    Dispositivo d = dispositivos[i];
+    bool b;
+    if (jsonStr(obj, "nombre", v)) d.nombre = limpiarTexto(v);
+    if (jsonStr(obj, "ip", v))     d.ip     = limpiarTexto(v);
+    if (jsonStr(obj, "mac", v))    stringToMac(v, d.mac);
+    if (jsonLong(obj, "numBoton", n))  d.numBoton  = (uint8_t) constrain((int)n, 1, MAX_BOTON);
+    if (jsonBool(obj, "estadoESP", b)) d.estadoESP = b;
+    if (jsonLong(obj, "codigoRF", n))  d.codigoRF  = (uint32_t)n & 0xFFFFFF;
+    if (jsonBool(obj, "usarESPNOW", b)) d.usarESPNOW = b;
+    if (jsonBool(obj, "usarRF", b))     d.usarRF     = b;
+    if (jsonBool(obj, "activo", b))     d.activo     = b;
+    if (jsonLong(obj, "maxFallos", n)) d.maxFallos = (uint8_t) constrain((int)n, 1, MAX_FALLOS_LIM);
+    if (jsonLong(obj, "tApagado", n))  d.tApagado  = (uint8_t) constrain((int)n, 1, MAX_T_APAGADO);
+    if (jsonLong(obj, "tGracia", n))   d.tGracia   = (uint16_t)constrain((int)n, MIN_T_GRACIA, MAX_T_GRACIA);
+
+    xSemaphoreTake(watchdogMutex, portMAX_DELAY);
+    dispositivos[i] = d;
+    xSemaphoreGive(watchdogMutex);
+    guardarDispositivoNVS(i);
+    Serial.printf("  ✅ Disp %d: %s\n", i, d.nombre.c_str());
+  }
+  Serial.println("✅ Dispositivos importados");
+  return true;
+}
+
+// ── Subida del fichero ───────────────────────────────────────
+static String importBuffer;
+static bool   importAutorizado = false;
+static bool   importDemasiadoGrande = false;
+
+// Se llama varias veces mientras llega el fichero (START, WRITE, END)
+void handleImportNVS() {
   HTTPUpload& upload = server.upload();
-  static String jsonBuffer = "";
 
   if (upload.status == UPLOAD_FILE_START) {
-    jsonBuffer = "";
-    Serial.println("📤 Importando config NVS...");
+    // ✅ FIX SEGURIDAD: antes este paso no comprobaba la contraseña y
+    // cualquiera de la red podía cambiar la config. Ahora se comprueba
+    // al empezar la subida (las cabeceras ya han llegado).
+    importAutorizado      = server.authenticate("admin", cfgWebPass.c_str());
+    importDemasiadoGrande = false;
+    importBuffer          = "";
+    if (importAutorizado) importBuffer.reserve(4096);
+    Serial.printf("📤 Importando config NVS... %s\n", importAutorizado ? "" : "(SIN AUTORIZACIÓN — se ignora)");
   }
   else if (upload.status == UPLOAD_FILE_WRITE) {
-    for (size_t i = 0; i < upload.currentSize; i++) {
-      jsonBuffer += (char)upload.buf[i];
+    if (!importAutorizado || importDemasiadoGrande) return;
+    if (importBuffer.length() + upload.currentSize > MAX_IMPORT_BYTES) {
+      importDemasiadoGrande = true;
+      importBuffer = "";
+      return;
     }
+    importBuffer.concat((const char*)upload.buf, upload.currentSize);
   }
-  else if (upload.status == UPLOAD_FILE_END) {
-    Serial.printf("📤 JSON recibido: %d bytes\n", jsonBuffer.length());
+}
 
-    // ── Helpers de parser JSON ────────────────────────────
-    auto getStr = [](const String& json, const String& key) -> String {
-      String search = "\"" + key + "\": \"";
-      int idx = json.indexOf(search);
-      if (idx < 0) return "";
-      idx += search.length();
-      int end = json.indexOf("\"", idx);
-      return (end > idx) ? json.substring(idx, end) : "";
-    };
+// Se llama una vez al terminar la subida: aquí se aplica y se responde
+void handleImportNVSFin() {
+  if (!checkAuth()) { importBuffer = ""; return; }
 
-    auto getInt = [](const String& json, const String& key) -> int {
-      String search = "\"" + key + "\": ";
-      int idx = json.indexOf(search);
-      if (idx < 0) return 0;
-      idx += search.length();
-      int end = idx;
-      while (end < (int)json.length() &&
-             (isDigit(json[end]) || json[end]=='-')) end++;
-      return json.substring(idx, end).toInt();
-    };
+  Serial.printf("📤 JSON recibido: %d bytes\n", importBuffer.length());
+  bool ok = importAutorizado && !importDemasiadoGrande && aplicarImportJSON(importBuffer);
+  importBuffer = "";
 
-    auto getBool = [](const String& json, const String& key) -> bool {
-      String search = "\"" + key + "\": ";
-      int idx = json.indexOf(search);
-      if (idx < 0) return false;
-      idx += search.length();
-      return json.substring(idx, idx + 4) == "true";
-    };
-
-    // ── Config global ─────────────────────────────────────
-    int cfgStart = jsonBuffer.indexOf("\"config\":");
-    int cfgEnd   = jsonBuffer.indexOf("\"dispositivos\":");
-    if (cfgStart >= 0 && cfgEnd > cfgStart) {
-      String cfgBlock = jsonBuffer.substring(cfgStart, cfgEnd);
-      String v;
-      v = getStr(cfgBlock, "ssid");     if (v.length()>0) cfgSSID    = v;
-      v = getStr(cfgBlock, "pass");     if (v.length()>0) cfgPass    = v;
-      v = getStr(cfgBlock, "webpass");  if (v.length()>0) cfgWebPass = v;
-      v = getStr(cfgBlock, "ip");       if (v.length()>0) cfgIP      = v;
-      v = getStr(cfgBlock, "gw");       if (v.length()>0) cfgGW      = v;
-      v = getStr(cfgBlock, "sn");       if (v.length()>0) cfgSN      = v;
-      v = getStr(cfgBlock, "dns");      if (v.length()>0) cfgDNS     = v;
-      int iv = getInt(cfgBlock, "intervalo");
-      if (iv >= 5) cfgIntervalo = iv;
-      guardarConfigNVS();
-      Serial.println("✅ Config global importada");
-    }
-
-    // ── Dispositivos ──────────────────────────────────────
-    // ✅ FIX: buscar el array "dispositivos" y procesar cada objeto
-    // El bug anterior: indexOf("{") encontraba el { de "config" primero
-    // Ahora buscamos el "[" del array y procesamos objeto a objeto
-    int arrStart = jsonBuffer.indexOf("\"dispositivos\": [");
-    if (arrStart < 0) arrStart = jsonBuffer.indexOf("\"dispositivos\":[");
-    if (arrStart >= 0) {
-      // Saltar hasta el primer [ del array
-      int pos = jsonBuffer.indexOf("[", arrStart);
-      if (pos >= 0) pos++; // saltar el [
-
-      for (int i = 0; i < MAX_DISPOSITIVOS && pos >= 0; i++) {
-        // Buscar el siguiente { que abre un objeto del array
-        int open = jsonBuffer.indexOf("{", pos);
-        if (open < 0) break;
-
-        // Buscar el } de cierre de ESTE objeto
-        // Tenemos que contar llaves para no confundirnos si hubiera anidado
-        int depth = 0;
-        int close = -1;
-        for (int j = open; j < (int)jsonBuffer.length(); j++) {
-          if (jsonBuffer[j] == '{') depth++;
-          else if (jsonBuffer[j] == '}') {
-            depth--;
-            if (depth == 0) { close = j; break; }
-          }
-        }
-        if (close < 0) break;
-
-        String obj = jsonBuffer.substring(open, close + 1);
-        pos = close + 1;
-
-        dispositivos[i].nombre    = getStr(obj, "nombre");
-        dispositivos[i].ip        = getStr(obj, "ip");
-        String macStr             = getStr(obj, "mac");
-        if (macStr.length() > 0) stringToMac(macStr, dispositivos[i].mac);
-        dispositivos[i].numBoton  = (uint8_t)getInt(obj, "numBoton");
-        dispositivos[i].estadoESP = getBool(obj, "estadoESP");
-        dispositivos[i].codigoRF  = (uint32_t)getInt(obj, "codigoRF");
-        dispositivos[i].usarESPNOW= getBool(obj, "usarESPNOW");
-        dispositivos[i].usarRF    = getBool(obj, "usarRF");
-        dispositivos[i].activo    = getBool(obj, "activo");
-        dispositivos[i].maxFallos = (uint8_t)max(1, getInt(obj, "maxFallos"));
-        dispositivos[i].tApagado  = (uint8_t)max(1, getInt(obj, "tApagado"));
-        dispositivos[i].tGracia   = (uint8_t)max(10,getInt(obj, "tGracia"));
-
-        guardarDispositivoNVS(i);
-        Serial.printf("  ✅ Disp %d: %s\n", i, dispositivos[i].nombre.c_str());
-      }
-      Serial.println("✅ Dispositivos importados");
-    } else {
-      Serial.println("❌ No se encontró array dispositivos en el JSON");
-    }
-
-    añadirLog("SISTEMA", "Config importada desde JSON — reiniciando");
-    server.send(200, "text/html; charset=utf-8",
-      "<html><body style='background:#0f172a;color:#22c55e;text-align:center;padding-top:60px'>"
-      "<h2>✅ Config importada</h2>"
-      "<p style='color:#94a3b8'>Reiniciando para aplicar...</p>"
-      "</body></html>");
-    delay(2000);
-    ESP.restart();
+  if (!ok) {
+    server.sendHeader("Location", "/config?importError=1");
+    server.send(303);
+    return;
   }
+
+  anadirLog("SISTEMA", "Config importada desde JSON — reiniciando");
+  server.send(200, "text/html; charset=utf-8",
+    "<html><body style='background:#0f172a;color:#22c55e;text-align:center;padding-top:60px'>"
+    "<h2>✅ Config importada</h2>"
+    "<p style='color:#94a3b8'>Reiniciando para aplicar...</p>"
+    "</body></html>");
+  delay(2000);
+  ESP.restart();
 }
 
 // ============================================================
@@ -704,12 +820,114 @@ static bool    wifiReconectarPendiente = false;
 static String  wifiSsidPendiente       = "";
 static String  wifiPassPendiente       = "";
 static unsigned long ultimoCheckWiFi   = 0;
-static bool    wifiAutoSwitchActivo    = true;
+
+bool apRescateActivo = false;
+
+// ── Motivo de la última desconexión (lo da el propio ESP32) ──
+static volatile uint8_t razonDesconexion = 0;
+
+static void onWiFiDesconectado(arduino_event_id_t event, arduino_event_info_t info) {
+  razonDesconexion = info.wifi_sta_disconnected.reason;
+}
+
+// Traduce el código de error del WiFi a algo entendible
+static String explicarRazon(uint8_t r) {
+  switch (r) {
+    case 0:
+      return "sin respuesta del router";
+    case WIFI_REASON_NO_AP_FOUND:
+      return "no se encuentra esa red (¿apagada, lejos o nombre mal escrito?)";
+    case WIFI_REASON_AUTH_FAIL:
+    case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:
+    case WIFI_REASON_HANDSHAKE_TIMEOUT:
+    case WIFI_REASON_AUTH_EXPIRE:
+      return "CONTRASEÑA INCORRECTA (¿la has cambiado en el router?)";
+    case WIFI_REASON_NO_AP_FOUND_W_COMPATIBLE_SECURITY:
+    case WIFI_REASON_NO_AP_FOUND_IN_AUTHMODE_THRESHOLD:
+      return "el router usa una seguridad que el ESP32 no acepta (pon WPA2 en el router)";
+    case WIFI_REASON_NO_AP_FOUND_IN_RSSI_THRESHOLD:
+      return "señal demasiado débil";
+    case WIFI_REASON_ASSOC_FAIL:
+      return "el router rechaza la conexión (¿filtro MAC o demasiados equipos?)";
+    default:
+      return "código de error " + String(r);
+  }
+}
+
+// Esperar a que conecte, sin que salte el watchdog hardware
+static bool esperarConexion(unsigned long maxMs) {
+  unsigned long inicio = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - inicio < maxMs) {
+    delay(300); Serial.print(".");
+    esp_task_wdt_reset();
+  }
+  Serial.println();
+  return WiFi.status() == WL_CONNECTED;
+}
+
+// Intentar una red concreta. Devuelve true si conecta.
+static bool intentarRed(const String& ssid, const String& pass) {
+  WiFi.disconnect(false);
+  delay(100);
+  razonDesconexion = 0;
+  WiFi.begin(ssid.c_str(), pass.c_str());
+  if (esperarConexion(10000)) {
+    Serial.printf("✅ Conectado a: %s  IP: %s\n", ssid.c_str(), WiFi.localIP().toString().c_str());
+    return true;
+  }
+  String motivo = explicarRazon(razonDesconexion);
+  Serial.printf("❌ No conectó a %s → %s\n", ssid.c_str(), motivo.c_str());
+  anadirLog("WIFI", "No conecta a " + ssid + ": " + motivo);
+  return false;
+}
+
+// ── Modo rescate: WiFi propia del Watchdog ───────────────────
+static void activarAPRescate() {
+  if (apRescateActivo) return;
+  WiFi.mode(WIFI_AP_STA);
+  if (WiFi.softAP(AP_RESCATE_SSID, AP_RESCATE_PASS)) {
+    apRescateActivo = true;
+    Serial.println("🆘 MODO RESCATE: conéctate a la WiFi \"" AP_RESCATE_SSID "\" (clave: " AP_RESCATE_PASS ")");
+    Serial.println("🆘 y entra en http://" + WiFi.softAPIP().toString() + " → 📶 WIFI para corregir las redes");
+    anadirLog("WIFI", "🆘 Modo rescate activo: WiFi " AP_RESCATE_SSID " → http://" + WiFi.softAPIP().toString());
+  }
+}
+
+static void desactivarAPRescate() {
+  if (!apRescateActivo) return;
+  WiFi.softAPdisconnect(true); // apaga solo el punto de acceso, la conexión al router sigue
+  apRescateActivo = false;
+  Serial.println("✅ Modo rescate desactivado");
+  anadirLog("WIFI", "Modo rescate desactivado — conectado a " + WiFi.SSID());
+}
+
+// Guarda en un slot la red que ha funcionado (actualiza la contraseña si ya existía)
+static void recordarRed(const String& ssid, const String& pass) {
+  int slot = -1;
+  for (int i = 0; i < WIFI_MAX_SLOTS && slot < 0; i++) if (wifiSSIDs[i] == ssid) slot = i;
+  for (int i = 0; i < WIFI_MAX_SLOTS && slot < 0; i++) if (wifiSSIDs[i].length() == 0) slot = i;
+  if (slot < 0) slot = WIFI_MAX_SLOTS - 1;
+  wifiSSIDs[slot]  = ssid;
+  wifiPasses[slot] = pass;
+  guardarRedWiFiNVS(slot);
+  anadirLog("WIFI", "Red " + ssid + " guardada en slot " + String(slot + 1) + " con la contraseña nueva");
+}
 
 // ============================================================
-// CONECTAR WIFI AL ARRANQUE — intenta preferida primero
+// CONECTAR WIFI — intenta preferida primero, luego el resto,
+// luego las redes de CONFIG y de secrets.h. Si nada funciona,
+// activa el MODO RESCATE.
 // ============================================================
 void conectarWiFiMultiRed() {
+  static bool eventoRegistrado = false;
+  if (!eventoRegistrado) {
+    WiFi.onEvent(onWiFiDesconectado, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+    eventoRegistrado = true;
+  }
+
+  // El modo hay que ponerlo ANTES de configurar la IP
+  WiFi.mode(apRescateActivo ? WIFI_AP_STA : WIFI_STA);
+
   // Aplicar IP estática antes de conectar
   IPAddress ip, gw, sn, dns;
   if (ip.fromString(cfgIP) && gw.fromString(cfgGW) &&
@@ -727,18 +945,8 @@ void conectarWiFiMultiRed() {
     wifiSSIDs[i]  = prefs.getString(("wssid" + String(i)).c_str(), "");
     wifiPasses[i] = prefs.getString(("wpass" + String(i)).c_str(), "");
   }
-  wifiPref = prefs.getInt("wifiPref", 0);
+  wifiPref = constrain(prefs.getInt("wifiPref", 0), 0, WIFI_MAX_SLOTS - 1);
   prefs.end();
-
-  // Si no hay redes guardadas usar las del código
-  bool hayRedes = false;
-  for (int i = 0; i < WIFI_MAX_SLOTS; i++)
-    if (wifiSSIDs[i].length() > 0) { hayRedes = true; break; }
-  if (!hayRedes) {
-    wifiSSIDs[0]  = cfgSSID;
-    wifiPasses[0] = cfgPass;
-    Serial.println("ℹ️ Sin redes guardadas, usando SSID por defecto: " + cfgSSID);
-  }
 
   // Orden: preferida primero, luego el resto
   int orden[WIFI_MAX_SLOTS];
@@ -747,27 +955,34 @@ void conectarWiFiMultiRed() {
   for (int i = 0; i < WIFI_MAX_SLOTS; i++)
     if (i != wifiPref) orden[k++] = i;
 
-  WiFi.mode(WIFI_STA);
   for (int t = 0; t < WIFI_MAX_SLOTS; t++) {
     int idx = orden[t];
     if (wifiSSIDs[idx].length() == 0) continue;
     Serial.printf("📶 Intentando slot %d: %s\n", idx, wifiSSIDs[idx].c_str());
-    WiFi.disconnect(false);
-    delay(100);
-    WiFi.begin(wifiSSIDs[idx].c_str(), wifiPasses[idx].c_str());
-    unsigned long inicio = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - inicio < 8000) {
-      delay(300); Serial.print(".");
-    }
-    Serial.println();
-    if (WiFi.status() == WL_CONNECTED) {
-      Serial.printf("✅ Conectado a: %s  IP: %s\n",
-        wifiSSIDs[idx].c_str(), WiFi.localIP().toString().c_str());
+    if (intentarRed(wifiSSIDs[idx], wifiPasses[idx])) { desactivarAPRescate(); return; }
+  }
+
+  // Redes extra: la de CONFIG y la de secrets.h (por si has cambiado la
+  // contraseña del router y las guardadas tienen la antigua)
+  String extraSSID[2] = { cfgSSID, String(DEF_SSID) };
+  String extraPass[2] = { cfgPass, String(DEF_PASS) };
+  for (int e = 0; e < 2; e++) {
+    if (extraSSID[e].length() == 0) continue;
+    if (e == 1 && extraSSID[1] == extraSSID[0] && extraPass[1] == extraPass[0]) continue;
+    bool yaProbada = false;
+    for (int i = 0; i < WIFI_MAX_SLOTS; i++)
+      if (wifiSSIDs[i] == extraSSID[e] && wifiPasses[i] == extraPass[e]) yaProbada = true;
+    if (yaProbada) continue;
+    Serial.printf("📶 Intentando red de %s: %s\n", e == 0 ? "CONFIG" : "secrets.h", extraSSID[e].c_str());
+    if (intentarRed(extraSSID[e], extraPass[e])) {
+      recordarRed(extraSSID[e], extraPass[e]);
+      desactivarAPRescate();
       return;
     }
-    Serial.printf("❌ No conectó a %s\n", wifiSSIDs[idx].c_str());
   }
+
   Serial.println("⚠️ No se pudo conectar a ninguna red.");
+  activarAPRescate();
 }
 
 // ============================================================
@@ -779,18 +994,20 @@ void chequearCambioWiFi() {
     Serial.printf("🔀 Reconectando a: %s\n", wifiSsidPendiente.c_str());
     WiFi.disconnect(false); delay(200);
     WiFi.begin(wifiSsidPendiente.c_str(), wifiPassPendiente.c_str());
-    unsigned long ini = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - ini < 12000) {
-      delay(300); Serial.print(".");
-    }
-    Serial.println();
-    if (WiFi.status() != WL_CONNECTED) conectarWiFiMultiRed();
+    if (!esperarConexion(12000)) conectarWiFiMultiRed();
     return;
   }
-  if (!wifiAutoSwitchActivo) return;
-  if (millis() - ultimoCheckWiFi < WIFI_CHECK_INTERVAL) return;
+  // En modo rescate se reintenta menos a menudo, para que dé tiempo a usar la web
+  unsigned long intervalo = apRescateActivo ? WIFI_RETRY_RESCATE_MS : WIFI_CHECK_INTERVAL;
+  if (millis() - ultimoCheckWiFi < intervalo) return;
   ultimoCheckWiFi = millis();
-  if (WiFi.status() != WL_CONNECTED) { conectarWiFiMultiRed(); return; }
+  // Reconexión si se ha caído (antes también lo hacía la tarea de Core 1,
+  // y las dos podían pisarse)
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("⚠️ WiFi caído, reconectando...");
+    conectarWiFiMultiRed();
+    return;
+  }
   int rssiActual = WiFi.RSSI();
   if (rssiActual > WIFI_SWITCH_THRESHOLD) return;
   Serial.printf("📉 Señal débil (%d dBm), buscando mejor...\n", rssiActual);
@@ -850,12 +1067,14 @@ void handleConfigWiFi() {
 
   html += "<div class='ip-bar'>Estado: <span>" + String(conectado?"✅ Conectado":"❌ Sin conexión") + "</span>";
   if (conectado) {
-    html += " &nbsp;|&nbsp; Red: <span>" + ssidActual + "</span>";
+    html += " &nbsp;|&nbsp; Red: <span>" + htmlEscape(ssidActual) + "</span>";
     html += " &nbsp;|&nbsp; IP: <span>" + WiFi.localIP().toString() + "</span>";
     html += " &nbsp;|&nbsp; <span>" + String(rssiActual) + " dBm</span>";
   }
   html += "</div>";
   html += "<div class='nav'><a href='/'><button class='btn btn-gray'>🏠 VOLVER</button></a></div>";
+  if (apRescateActivo)
+    html += "<div class='aviso'>🆘 <b>MODO RESCATE</b>: no conecta a ninguna red. Corrige la contraseña de tu red abajo (mismo slot) y pulsa GUARDAR: lo intentará en unos segundos. Mira el 📋 LOG para ver por qué falla cada red.</div>";
 
   html += "<div class='card'><h2>📡 REDES GUARDADAS</h2>";
   for (int i = 0; i < WIFI_MAX_SLOTS; i++) {
@@ -866,7 +1085,7 @@ void handleConfigWiFi() {
     html += "<div style='display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px'><div>";
     html += "<div style='font-size:0.7rem;color:#64748b'>Slot " + String(i+1) + "</div>";
     if (wifiSSIDs[i].length()>0) {
-      html += "<div style='font-size:0.9rem;font-weight:bold'>" + wifiSSIDs[i];
+      html += "<div style='font-size:0.9rem;font-weight:bold'>" + htmlEscape(wifiSSIDs[i]);
       if (esCon)  html += "<span class='badge badge-ok'>✅ CONECTADA</span>";
       if (esPref) html += "<span class='badge badge-pref'>⭐ PREFERIDA</span>";
       html += "</div>";
@@ -895,7 +1114,7 @@ void handleConfigWiFi() {
   html += "<label>Slot</label><select name='slot' class='cfg'>";
   for (int i=0;i<WIFI_MAX_SLOTS;i++) {
     html += "<option value='"+String(i)+"'>Slot "+String(i+1);
-    if (wifiSSIDs[i].length()>0) html += " — "+wifiSSIDs[i];
+    if (wifiSSIDs[i].length()>0) html += " — "+htmlEscape(wifiSSIDs[i]);
     html += "</option>";
   }
   html += "</select>";
@@ -907,12 +1126,13 @@ void handleConfigWiFi() {
 
   html += "<script>";
   html += "function escanear(){document.getElementById('scanResult').innerHTML='🔍 Escaneando...';";
-  html += "fetch('/scanWiFi').then(r=>r.json()).then(data=>{let h='<div style=\"margin-top:6px\">';";
-  html += "data.redes.forEach(r=>{let bars=r.rssi>-50?4:r.rssi>-65?3:r.rssi>-75?2:r.rssi>-85?1:0;";
-  html += "let seg=r.secure?'🔒':'🔓';";
-  html += "h+='<div onclick=\"selRed(\\\"'+r.ssid+'\\\")\" style=\"cursor:pointer;padding:6px 10px;margin:3px 0;background:#1e293b;border-radius:8px;display:flex;justify-content:space-between;align-items:center\">';";
-  html += "h+='<span>'+seg+' '+r.ssid+'</span><span style=\"color:#64748b;font-size:0.7rem\">'+r.rssi+' dBm</span></div>';});";
-  html += "h+='</div>';document.getElementById('scanResult').innerHTML=h;";
+  // Se construye con textContent: así un nombre de red raro no puede meter código en la página
+  html += "fetch('/scanWiFi').then(r=>r.json()).then(data=>{let box=document.getElementById('scanResult');box.innerHTML='';";
+  html += "data.redes.forEach(r=>{let d=document.createElement('div');";
+  html += "d.style.cssText='cursor:pointer;padding:6px 10px;margin:3px 0;background:#1e293b;border-radius:8px;display:flex;justify-content:space-between;align-items:center';";
+  html += "let a=document.createElement('span');a.textContent=(r.secure?'🔒 ':'🔓 ')+r.ssid;";
+  html += "let b=document.createElement('span');b.style.cssText='color:#64748b;font-size:0.7rem';b.textContent=r.rssi+' dBm';";
+  html += "d.appendChild(a);d.appendChild(b);d.onclick=()=>selRed(r.ssid);box.appendChild(d);});";
   html += "}).catch(()=>{document.getElementById('scanResult').innerHTML='❌ Error';});}";
   html += "function selRed(s){document.querySelector('input[name=ssid]').value=s;}";
   html += "</script></body></html>";
@@ -926,11 +1146,10 @@ void handleGuardarWiFi() {
     if (slot>=0 && slot<WIFI_MAX_SLOTS) {
       wifiSSIDs[slot]  = server.arg("ssid");
       wifiPasses[slot] = server.arg("pass");
-      prefs.begin(NVS_NAMESPACE, false);
-      prefs.putString(("wssid"+String(slot)).c_str(), wifiSSIDs[slot]);
-      prefs.putString(("wpass"+String(slot)).c_str(), wifiPasses[slot]);
-      prefs.end();
-      añadirLog("WIFI","Red guardada slot "+String(slot+1)+": "+wifiSSIDs[slot]);
+      guardarRedWiFiNVS(slot);
+      anadirLog("WIFI","Red guardada slot "+String(slot+1)+": "+wifiSSIDs[slot]);
+      // Sin conexión (p. ej. en modo rescate): probar la red nueva en unos segundos
+      if (WiFi.status() != WL_CONNECTED) ultimoCheckWiFi = millis() - WIFI_RETRY_RESCATE_MS + 5000;
     }
   }
   server.sendHeader("Location","/configWiFi"); server.send(303);
@@ -941,11 +1160,8 @@ void handleBorrarWiFi() {
   int slot = server.arg("slot").toInt();
   if (slot>=0 && slot<WIFI_MAX_SLOTS) {
     wifiSSIDs[slot]=""; wifiPasses[slot]="";
-    prefs.begin(NVS_NAMESPACE, false);
-    prefs.putString(("wssid"+String(slot)).c_str(),"");
-    prefs.putString(("wpass"+String(slot)).c_str(),"");
-    prefs.end();
-    añadirLog("WIFI","Red slot "+String(slot+1)+" borrada");
+    guardarRedWiFiNVS(slot);
+    anadirLog("WIFI","Red slot "+String(slot+1)+" borrada");
   }
   server.sendHeader("Location","/configWiFi"); server.send(303);
 }
@@ -955,10 +1171,8 @@ void handleSetPreferidaWiFi() {
   int slot = server.arg("slot").toInt();
   if (slot>=0 && slot<WIFI_MAX_SLOTS) {
     wifiPref = slot;
-    prefs.begin(NVS_NAMESPACE, false);
-    prefs.putInt("wifiPref", slot);
-    prefs.end();
-    añadirLog("WIFI","Preferida slot "+String(slot+1)+" — "+wifiSSIDs[slot]);
+    guardarWiFiPrefNVS();
+    anadirLog("WIFI","Preferida slot "+String(slot+1)+" — "+wifiSSIDs[slot]);
   }
   server.sendHeader("Location","/configWiFi"); server.send(303);
 }
@@ -969,7 +1183,7 @@ void handleScanWiFi() {
   String json = "{\"redes\":[";
   for (int i=0;i<n&&i<20;i++) {
     if(i>0) json+=",";
-    json+="{\"ssid\":\""+WiFi.SSID(i)+"\",\"rssi\":"+String(WiFi.RSSI(i))+",\"secure\":"+String(WiFi.encryptionType(i)!=WIFI_AUTH_OPEN?1:0)+"}";
+    json+="{\"ssid\":\""+jsonEscape(WiFi.SSID(i))+"\",\"rssi\":"+String(WiFi.RSSI(i))+",\"secure\":"+String(WiFi.encryptionType(i)!=WIFI_AUTH_OPEN?1:0)+"}";
   }
   json+="]}";
   WiFi.scanDelete();
@@ -1011,7 +1225,8 @@ void handleAyuda() {
   html += "</div></div>";
 
   html += "<div class='card'><h2>📶 WiFi Multi-red</h2>";
-  html += "<p style='color:#94a3b8;font-size:0.82rem;line-height:1.8'>Hasta <b>5 redes</b>. Conecta a la preferida ⭐ primero. Auto-switch si señal baja de -75 dBm.</p></div>";
+  html += "<p style='color:#94a3b8;font-size:0.82rem;line-height:1.8'>Hasta <b>5 redes</b>. Conecta a la preferida ⭐ primero. Auto-switch si señal baja de -75 dBm.<br>";
+  html += "⚠️ ESP-NOW usa el mismo canal que el WiFi: si cambias a un router en otro canal, los enchufes pueden dejar de recibir las órdenes.</p></div>";
 
   html += "<div class='card'><h2>💾 Backup NVS</h2>";
   html += "<p style='color:#94a3b8;font-size:0.82rem;line-height:1.8'>En <b>⚙️ CONFIG → BACKUP</b>: exportar/importar <code>watchdog_config.json</code> para clonar configuración entre placas.</p></div>";
@@ -1037,15 +1252,7 @@ void iniciarServidorWeb() {
   server.on("/testRF",              HTTP_POST, handleTestRF);
   server.on("/testESP",             HTTP_POST, handleTestESP);
   server.on("/exportNVS",           HTTP_GET,  handleExportNVS);
-  server.on("/importNVS",           HTTP_POST,
-    []() {
-      // ✅ Handler de respuesta final — aquí sí va la autenticación
-      if (!server.authenticate("admin", cfgWebPass.c_str())) {
-        server.requestAuthentication();
-      }
-    },
-    handleImportNVS
-  );
+  server.on("/importNVS",           HTTP_POST, handleImportNVSFin, handleImportNVS);
   server.on("/configWiFi",          HTTP_GET,  handleConfigWiFi);
   server.on("/guardarWiFi",         HTTP_POST, handleGuardarWiFi);
   server.on("/borrarWiFi",          HTTP_GET,  handleBorrarWiFi);

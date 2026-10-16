@@ -1,0 +1,13 @@
+# Claves privadas (WiFi, contraseña web) — nunca a GitHub
+secrets.h
+
+# Backups exportados desde la web: contienen las contraseñas
+watchdog_config*.json
+
+# Copias comprimidas: para eso ya está el historial de git
+*.rar
+*.zip
+
+# Carpetas de compilación
+build/
+.pio/

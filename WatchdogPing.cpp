@@ -1,4 +1,5 @@
 #include "WatchdogWeb.h"
+#include <esp_task_wdt.h>
 
 // ============================================================
 // CONVERTIR MAC uint8_t[6] → String "AA:BB:CC:DD:EE:FF"
@@ -23,14 +24,85 @@ bool stringToMac(const String& str, uint8_t* mac) {
 }
 
 // ============================================================
-// AÑADIR ENTRADA AL LOG CIRCULAR
+// LIMPIAR TEXTO — quita '|' (separador de la NVS) y caracteres
+// de control (saltos de línea, tabuladores...)
 // ============================================================
-void añadirLog(const String& dispositivo, const String& evento) {
+String limpiarTexto(const String& s) {
+  String r;
+  r.reserve(s.length());
+  for (size_t i = 0; i < s.length(); i++) {
+    char c = s[i];
+    if (c == '|' || (uint8_t)c < 0x20) continue;
+    r += c;
+  }
+  r.trim();
+  return r;
+}
+
+// ============================================================
+// ESCAPAR PARA HTML — evita que un nombre con comillas o < >
+// rompa la página
+// ============================================================
+String htmlEscape(const String& s) {
+  String r;
+  r.reserve(s.length() + 8);
+  for (size_t i = 0; i < s.length(); i++) {
+    char c = s[i];
+    switch (c) {
+      case '&':  r += "&amp;";  break;
+      case '<':  r += "&lt;";   break;
+      case '>':  r += "&gt;";   break;
+      case '"':  r += "&quot;"; break;
+      case '\'': r += "&#39;";  break;
+      default:   r += c;
+    }
+  }
+  return r;
+}
+
+// ============================================================
+// ESCAPAR PARA JSON — comillas y barras invertidas
+// ============================================================
+String jsonEscape(const String& s) {
+  String r;
+  r.reserve(s.length() + 4);
+  for (size_t i = 0; i < s.length(); i++) {
+    char c = s[i];
+    if (c == '"' || c == '\\') { r += '\\'; r += c; }
+    else if ((uint8_t)c >= 0x20) r += c;  // los de control se descartan
+  }
+  return r;
+}
+
+// ============================================================
+// HORA DE UNA ENTRADA DEL LOG — fecha real si ya había NTP,
+// si no, el tiempo desde el arranque
+// ============================================================
+String formatHoraLog(const LogEntry& e) {
+  if (e.hora > 1600000000) {  // fecha válida (posterior a 2020)
+    struct tm t;
+    localtime_r(&e.hora, &t);
+    char buf[20];
+    strftime(buf, sizeof(buf), "%d/%m %H:%M:%S", &t);
+    return String(buf);
+  }
+  return formatUptime(e.timestamp);
+}
+
+// ============================================================
+// AÑADIR ENTRADA AL LOG CIRCULAR — protegido con logMutex
+// porque se llama desde Core 0 (web) y Core 1 (ping)
+// ============================================================
+void anadirLog(const String& dispositivo, const String& evento) {
+  time_t ahora = time(nullptr);
+  if (logMutex) xSemaphoreTake(logMutex, portMAX_DELAY);
   logEventos[logIndex].dispositivo = dispositivo;
   logEventos[logIndex].evento      = evento;
   logEventos[logIndex].timestamp   = millis();
+  logEventos[logIndex].hora        = ahora;
   logEventos[logIndex].valido      = true;
   logIndex = (logIndex + 1) % MAX_LOG; // circular
+  if (logMutex) xSemaphoreGive(logMutex);
   Serial.printf("📋 LOG: [%s] %s\n", dispositivo.c_str(), evento.c_str());
 }
 
@@ -43,7 +115,8 @@ bool pingHTTP(const String& ip) {
   HTTPClient http;
   String url = "http://" + ip + "/status";
   http.begin(url);
-  http.setTimeout(3000); // 3 segundos máximo de espera
+  http.setConnectTimeout(3000); // 3 segundos máximo para conectar
+  http.setTimeout(3000);        // 3 segundos máximo de espera de respuesta
 
   int httpCode = http.GET();
   http.end();
@@ -62,107 +135,129 @@ bool pingHTTP(const String& ip) {
 // ACTUAR SOBRE DISPOSITIVO CAÍDO — apagar (toggle OFF)
 // ============================================================
 void actuarSobreDispositivo(int idx, const String& motivo) {
-  Serial.printf("🚨 ACTUANDO sobre %s — %s\n",
-    dispositivos[idx].nombre.c_str(), motivo.c_str());
+  // Copia del dispositivo para no leer Strings mientras la web los cambia
+  xSemaphoreTake(watchdogMutex, portMAX_DELAY);
+  Dispositivo d = dispositivos[idx];
+  xSemaphoreGive(watchdogMutex);
 
-  añadirLog(dispositivos[idx].nombre,
-    "🚨 REINICIO: " + motivo + " (" + String(dispositivos[idx].maxFallos) + " fallos)");
-
-  uint8_t boton = dispositivos[idx].numBoton;
+  Serial.printf("🚨 ACTUANDO sobre %s — %s\n", d.nombre.c_str(), motivo.c_str());
+  anadirLog(d.nombre, "🚨 REINICIO: " + motivo);
 
   // ── APAGAR: enviamos estado CONTRARIO al normal ──────────────
   // estadoESP = estado con alimentación conectada (normal)
   // Para cortar alimentación enviamos !estadoESP
   // Ejemplo: relé normalmente ON → enviamos OFF para cortar
-  bool estadoApagar = !dispositivos[idx].estadoESP;
+  bool estadoApagar = !d.estadoESP;
 
-  if (dispositivos[idx].usarESPNOW) {
-    // ✅ BROADCAST: FF:FF:FF:FF:FF:FF — todos los enchufes escuchan
-    // No necesitamos MAC del enchufe — igual que hace el tablero
-    uint8_t broadcast[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
-    registrarPeer(broadcast);
-    struct_message msg;
-    msg.controlValue = (boton * 2) - (estadoApagar ? 1 : 0);
-    esp_err_t res = esp_now_send(broadcast, (uint8_t*)&msg, sizeof(msg));
+  if (d.usarESPNOW) {
+    int cv = (d.numBoton * 2) - (estadoApagar ? 1 : 0);
+    bool ok = enviarESPNOW(cv);
     Serial.printf("📡 ESP-NOW BROADCAST APAGAR B%d→%s (controlValue=%d): %s\n",
-      boton, estadoApagar ? "ON" : "OFF", msg.controlValue,
-      res == ESP_OK ? "enviado" : "error");
+      d.numBoton, estadoApagar ? "ON" : "OFF", cv, ok ? "enviado" : "error");
   }
 
-  if (dispositivos[idx].usarRF && dispositivos[idx].codigoRF != 0) {
-    rf.send(dispositivos[idx].codigoRF, 24);
-    Serial.printf("📻 RF apagado enviado: %lu\n", dispositivos[idx].codigoRF);
+  if (d.usarRF && d.codigoRF != 0) {
+    rf.send(d.codigoRF, 24);
+    Serial.printf("📻 RF apagado enviado: %lu\n", (unsigned long)d.codigoRF);
   }
 
-  if (xSemaphoreTake(watchdogMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-    esperandoReencender[idx] = true;
-    tiempoApagado[idx]       = millis();
-    xSemaphoreGive(watchdogMutex);
-  }
+  // Esperamos lo que haga falta: si no se marcase, el enchufe se quedaría apagado
+  xSemaphoreTake(watchdogMutex, portMAX_DELAY);
+  esperandoReencender[idx] = true;
+  tiempoApagado[idx]       = millis();
+  if (reiniciosSeguidos[idx] < 255) reiniciosSeguidos[idx]++;
+  xSemaphoreGive(watchdogMutex);
 }
 
 // ============================================================
-// CICLO PRINCIPAL DE PING — se llama desde loop() cada N segundos
+// CICLO PRINCIPAL DE PING — se llama desde la tarea de Core 1
+// cada cfgIntervalo segundos
 // ============================================================
 void ejecutarCicloPing() {
   Serial.println("🔍 === CICLO PING ===");
 
   for (int i = 0; i < MAX_DISPOSITIVOS; i++) {
+    // El ciclo puede durar bastante: mantener vivos watchdog y temporizadores
+    esp_task_wdt_reset();
+    revisarTemporizadores();
+
+    // Copia de los datos que necesitamos, protegida con el mutex
+    if (xSemaphoreTake(watchdogMutex, pdMS_TO_TICKS(100)) != pdTRUE) continue;
+    Dispositivo   d          = dispositivos[i];
+    bool          esperando  = esperandoReencender[i];
+    bool          gracia     = enGracia[i];
+    unsigned long tReinicio  = tiempoReinicio[i];
+    uint8_t       reinicios  = reiniciosSeguidos[i];
+    xSemaphoreGive(watchdogMutex);
 
     // Saltar si no está configurado o no está activo
-    if (!dispositivos[i].activo || dispositivos[i].ip.length() == 0) continue;
+    if (!d.activo || d.ip.length() == 0) continue;
 
     // Saltar si está esperando reencenderse
-    if (esperandoReencender[i]) {
-      Serial.printf("⏳ %s — esperando reencender (%ds)\n",
-        dispositivos[i].nombre.c_str(), dispositivos[i].tApagado);
+    if (esperando) {
+      Serial.printf("⏳ %s — esperando reencender (%ds)\n", d.nombre.c_str(), d.tApagado);
       continue;
     }
 
     // Saltar si está en período de gracia
-    if (enGracia[i]) {
-      unsigned long restante = dispositivos[i].tGracia -
-        ((millis() - tiempoReinicio[i]) / 1000);
-      Serial.printf("🛡️ %s — en gracia (%lus restantes)\n",
-        dispositivos[i].nombre.c_str(), restante);
+    if (gracia) {
+      unsigned long pasado  = (millis() - tReinicio) / 1000;
+      unsigned long restante = (pasado < d.tGracia) ? d.tGracia - pasado : 0;
+      Serial.printf("🛡️ %s — en gracia (%lus restantes)\n", d.nombre.c_str(), restante);
       continue;
     }
 
     // Hacer ping HTTP
-    bool vivo = pingHTTP(dispositivos[i].ip);
+    bool vivo = pingHTTP(d.ip);
 
     if (vivo) {
-      // Responde — resetear contador de fallos
-      if (fallosActuales[i] > 0) {
-        Serial.printf("✅ %s — recuperado (tenía %d fallos)\n",
-          dispositivos[i].nombre.c_str(), fallosActuales[i]);
-        añadirLog(dispositivos[i].nombre, "✅ Recuperado tras " +
-          String(fallosActuales[i]) + " fallos");
+      // Responde — resetear contadores
+      xSemaphoreTake(watchdogMutex, portMAX_DELAY);
+      uint8_t teniaFallos  = fallosActuales[i];
+      fallosActuales[i]    = 0;
+      reiniciosSeguidos[i] = 0;
+      tiempoUltimoOK[i]    = millis();
+      xSemaphoreGive(watchdogMutex);
+
+      if (teniaFallos > 0) {
+        Serial.printf("✅ %s — recuperado (tenía %d fallos)\n", d.nombre.c_str(), teniaFallos);
+        anadirLog(d.nombre, "✅ Recuperado tras " + String(teniaFallos) + " fallos");
       }
-      fallosActuales[i]  = 0;
-      tiempoUltimoOK[i]  = millis();
-      Serial.printf("✅ %s — OK\n", dispositivos[i].nombre.c_str());
+      Serial.printf("✅ %s — OK\n", d.nombre.c_str());
 
     } else {
       // No responde — incrementar contador
-      fallosActuales[i]++;
-      Serial.printf("⚠️ %s — fallo %d/%d\n",
-        dispositivos[i].nombre.c_str(),
-        fallosActuales[i],
-        dispositivos[i].maxFallos);
+      xSemaphoreTake(watchdogMutex, portMAX_DELAY);
+      if (fallosActuales[i] < 255) fallosActuales[i]++;
+      uint8_t fallos = fallosActuales[i];
+      xSemaphoreGive(watchdogMutex);
 
-      añadirLog(dispositivos[i].nombre,
-        "⚠️ Fallo " + String(fallosActuales[i]) +
-        "/" + String(dispositivos[i].maxFallos));
+      Serial.printf("⚠️ %s — fallo %d/%d\n", d.nombre.c_str(), fallos, d.maxFallos);
+
+      // Solo se apunta en el log el primer fallo, para no llenarlo
+      if (fallos == 1) {
+        anadirLog(d.nombre, "⚠️ Sin respuesta (1/" + String(d.maxFallos) + ")");
+      }
 
       // ¿Hemos llegado al límite de fallos?
-      if (fallosActuales[i] >= dispositivos[i].maxFallos) {
-        actuarSobreDispositivo(i, String(dispositivos[i].maxFallos) + " fallos consecutivos");
+      if (fallos >= d.maxFallos) {
+        bool enPausa = reinicios >= MAX_REINICIOS_SEGUIDOS &&
+                       millis() - tReinicio < PAUSA_TRAS_REINICIOS_MS;
+        if (enPausa) {
+          // Ya lo hemos reiniciado varias veces y no se recupera:
+          // esperamos antes de volver a cortarle la corriente
+          if (fallos == d.maxFallos) {
+            anadirLog(d.nombre, "⏸️ Sigue caído tras " + String(reinicios) +
+              " reinicios — pausa de " + String(PAUSA_TRAS_REINICIOS_MS / 60000UL) + " min");
+          }
+        } else {
+          actuarSobreDispositivo(i, String(d.maxFallos) + " fallos consecutivos");
+        }
       }
     }
 
     // Pequeña pausa entre pings para no saturar la red
-    delay(500);
+    vTaskDelay(pdMS_TO_TICKS(500));
   }
 
   Serial.println("=== FIN CICLO PING ===");
